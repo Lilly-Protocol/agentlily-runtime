@@ -37,12 +37,25 @@ export class RuntimeEventBus {
     RuntimeEventName,
     Set<RuntimeEventListener<RuntimeEventName>>
   >();
+  private readonly maxListenersPerEvent: number;
+
+  public constructor(maxListenersPerEvent: number = 100) {
+    this.maxListenersPerEvent = maxListenersPerEvent;
+  }
 
   public on<TName extends RuntimeEventName>(
     name: TName,
     listener: RuntimeEventListener<TName>
   ): () => void {
     const existing = this.listeners.get(name) ?? new Set();
+    
+    if (existing.size >= this.maxListenersPerEvent) {
+      console.warn(
+        `RuntimeEventBus: Max listener limit (${this.maxListenersPerEvent}) exceeded for event "${name}". ` +
+        `Possible memory leak. Current count: ${existing.size}`
+      );
+    }
+
     existing.add(listener as RuntimeEventListener<RuntimeEventName>);
     this.listeners.set(name, existing);
 
@@ -59,5 +72,9 @@ export class RuntimeEventBus {
     listeners?.forEach((listener) => {
       listener(event);
     });
+  }
+
+  public listenerCount(name: RuntimeEventName): number {
+    return this.listeners.get(name)?.size ?? 0;
   }
 }
