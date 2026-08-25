@@ -1,4 +1,8 @@
 export interface RuntimeEventMap {
+  "runtime.internal.error": {
+    eventName: RuntimeEventName;
+    message: string;
+  };
   "runtime.started": { runtimeId: string; occurredAt: string };
   "runtime.task.received": {
     runtimeId: string;
@@ -57,7 +61,19 @@ export class RuntimeEventBus {
     const listeners = this.listeners.get(event.name);
 
     listeners?.forEach((listener) => {
-      listener(event);
+      try {
+        listener(event);
+      } catch (error) {
+        if (event.name !== "runtime.internal.error") {
+          this.emit({
+            name: "runtime.internal.error",
+            payload: {
+              eventName: event.name,
+              message: error instanceof Error ? error.message : String(error)
+            }
+          });
+        }
+      }
     });
   }
 }
