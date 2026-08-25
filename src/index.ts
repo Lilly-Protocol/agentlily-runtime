@@ -7,7 +7,10 @@ export type { RuntimeOptions } from "./runtime/types.js";
 export { AgentInstanceManager } from "./agents/agent-instance-manager.js";
 export { ActionExecutor } from "./actions/action-executor.js";
 export { RuntimeError } from "./errors/runtime-errors.js";
-export { RuntimeEventBus } from "./events/runtime-events.js";
+export {
+  RuntimeEventBus,
+  RuntimeEventListenerLimitError
+} from "./events/runtime-events.js";
 export { InMemoryRuntimeLogger } from "./logger/runtime-logger.js";
 export { InMemoryMemoryStore } from "./memory/memory-store.js";
 export { UnconfiguredModelProvider } from "./providers/model-provider.js";
@@ -19,6 +22,8 @@ export type { AgentInstance } from "./agents/agent-instance-manager.js";
 export type { RuntimeErrorCode } from "./errors/runtime-errors.js";
 export type {
   RuntimeEvent,
+  RuntimeEventBusOptions,
+  RuntimeEventListener,
   RuntimeEventMap,
   RuntimeEventName
 } from "./events/runtime-events.js";
