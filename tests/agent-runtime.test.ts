@@ -89,6 +89,49 @@ describe("AgentRuntime", () => {
       "runtime.task.received",
       "runtime.task.completed"
     ]);
+    expect(events.indexOf("runtime.task.received")).toBeLessThan(
+      events.indexOf("runtime.task.completed")
+    );
+  });
+
+  it("emits task received before task failed", async () => {
+    const eventBus = new RuntimeEventBus();
+    const events: string[] = [];
+    eventBus.on("runtime.task.received", (event) => {
+      events.push(event.name);
+    });
+    eventBus.on("runtime.task.failed", (event) => {
+      events.push(event.name);
+    });
+
+    const runtime = new AgentRuntime({
+      runtimeId: "runtime-failed-events",
+      eventBus
+    });
+
+    runtime.registerTool({
+      name: "fail",
+      description: "Throws an error.",
+      execute() {
+        throw new Error("Tool execution failed.");
+      }
+    });
+
+    await runtime.start();
+    await expect(
+      runtime.executeTask({
+        taskId: "task-failed-events",
+        agentId: "agent-failed-events",
+        toolName: "fail",
+        input: "Fail this task",
+        payload: {}
+      })
+    ).rejects.toThrow("Tool execution failed.");
+
+    expect(events).toEqual(["runtime.task.received", "runtime.task.failed"]);
+    expect(events.indexOf("runtime.task.received")).toBeLessThan(
+      events.indexOf("runtime.task.failed")
+    );
   });
 
   it("rejects execution before startup", async () => {
