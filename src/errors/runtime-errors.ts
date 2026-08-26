@@ -20,4 +20,14 @@ export class RuntimeError extends Error {
     this.code = code;
     this.details = details;
   }
+
+  public toJSON() {
+    return {
+      name: this.name,
+      code: this.code,
+      message: this.message,
+      details: this.details,
+      stack: this.stack,
+    };
+  }
 }
