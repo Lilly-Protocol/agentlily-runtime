@@ -56,8 +56,17 @@ export class RuntimeEventBus {
   ): void {
     const listeners = this.listeners.get(event.name);
 
-    listeners?.forEach((listener) => {
-      listener(event);
-    });
+    if (!listeners) return;
+
+    for (const listener of listeners) {
+      try {
+        listener(event);
+      } catch (error) {
+        console.error(
+          `RuntimeEventBus: listener error for "${event.name}":`,
+          error instanceof Error ? error.message : error
+        );
+      }
+    }
   }
 }
