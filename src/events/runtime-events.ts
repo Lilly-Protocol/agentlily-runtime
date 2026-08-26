@@ -17,6 +17,11 @@ export interface RuntimeEventMap {
     agentId: string;
     reason: string;
   };
+  "runtime.internal.error": {
+    eventName: string;
+    errorMessage: string;
+    occurredAt: string;
+  };
 }
 
 export type RuntimeEventName = keyof RuntimeEventMap;
@@ -56,8 +61,39 @@ export class RuntimeEventBus {
   ): void {
     const listeners = this.listeners.get(event.name);
 
-    listeners?.forEach((listener) => {
-      listener(event);
-    });
+    if (!listeners) return;
+
+    for (const listener of listeners) {
+      try {
+        listener(event);
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        console.error(
+          `RuntimeEventBus: listener error for "${event.name}":`,
+          errorMessage
+        );
+        // Emit internal error event (best-effort, avoid infinite loop)
+        if (event.name !== "runtime.internal.error") {
+          const internalErrorListeners = this.listeners.get("runtime.internal.error");
+          if (internalErrorListeners) {
+            const internalEvent = {
+              name: "runtime.internal.error" as const,
+              payload: {
+                eventName: event.name,
+                errorMessage,
+                occurredAt: new Date().toISOString(),
+              },
+            };
+            for (const iel of internalErrorListeners) {
+              try {
+                iel(internalEvent);
+              } catch {
+                // Swallow errors from internal error listeners to prevent loops
+              }
+            }
+          }
+        }
+      }
+    }
   }
 }
