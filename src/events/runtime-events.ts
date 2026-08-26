@@ -63,8 +63,8 @@ export class RuntimeEventBus {
         listener(event);
       } catch (error) {
         console.error(
-          `RuntimeEventBus: listener error for "${event.name}":`,
-          error instanceof Error ? error.message : error
+          `[RuntimeEventBus] Listener error during "${event.name}":`,
+          error
         );
       }
     }
