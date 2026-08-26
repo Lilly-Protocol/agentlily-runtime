@@ -124,3 +124,41 @@ describe("AgentRuntime", () => {
     });
   });
 });
+
+  it("custom memory store receives correct append payload end-to-end (Issue #120)", async () => {
+    const appended: Array<{ agentId: string; taskId: string; input: string; output: unknown }> = [];
+    const customStore = {
+      append: async (entry: any) => { appended.push(entry); },
+      listByAgent: async (agentId: string) => appended.filter((e) => e.agentId === agentId),
+    };
+
+    const runtime = new AgentRuntime({
+      runtimeId: "mem-roundtrip",
+      memoryStore: customStore as any,
+    });
+
+    runtime.registerTool({
+      name: "addNums",
+      description: "Adds two numbers",
+      execute: ({ payload }) => ({ sum: (payload as any).a + (payload as any).b }),
+    });
+
+    await runtime.start();
+    await runtime.executeTask({
+      taskId: "task-mem",
+      agentId: "agent-mem",
+      toolName: "addNums",
+      input: "compute 2+3",
+      payload: { a: 2, b: 3 },
+    });
+
+    expect(appended).toHaveLength(1);
+    expect(appended[0].agentId).toBe("agent-mem");
+    expect(appended[0].taskId).toBe("task-mem");
+    expect(appended[0].input).toBe("compute 2+3");
+    expect(appended[0].output).toEqual({ sum: 5 });
+
+    const listed = await customStore.listByAgent("agent-mem");
+    expect(listed).toHaveLength(1);
+    expect(listed[0].taskId).toBe("task-mem");
+  });
