@@ -80,13 +80,21 @@ export class AgentRuntime {
         context
       );
 
+      this.dependencies.logger.info("Runtime task completed.", {
+        runtimeId: this.runtimeId,
+        taskId: task.taskId,
+        toolName: task.toolName,
+        durationMs: result.durationMs
+      });
+
       this.dependencies.eventBus.emit({
         name: "runtime.task.completed",
         payload: {
           runtimeId: this.runtimeId,
           taskId: task.taskId,
           agentId: task.agentId,
-          toolName: task.toolName
+          toolName: task.toolName,
+          durationMs: result.durationMs
         }
       });
 
