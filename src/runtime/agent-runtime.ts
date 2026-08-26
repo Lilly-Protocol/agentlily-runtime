@@ -10,6 +10,7 @@ export class AgentRuntime {
   private readonly dependencies;
   private readonly runtimeId: string;
   private started = false;
+  private stopped = false;
 
   public constructor(options: RuntimeOptions) {
     this.runtimeId = options.runtimeId;
@@ -27,6 +28,12 @@ export class AgentRuntime {
       throw new RuntimeError(
         "RUNTIME_ALREADY_STARTED",
         "AgentRuntime has already been started."
+      );
+    }
+    if (this.stopped) {
+      throw new RuntimeError(
+        "RUNTIME_ALREADY_STOPPED",
+        "AgentRuntime has already been stopped and cannot be restarted."
       );
     }
 
@@ -138,5 +145,24 @@ export class AgentRuntime {
 
   public getDependencies() {
     return this.dependencies;
+  }
+
+  public async stop(): Promise<void> {
+    if (!this.started || this.stopped) {
+      return;
+    }
+
+    this.stopped = true;
+    this.started = false;
+    this.dependencies.logger.info("Runtime stopped.", {
+      runtimeId: this.runtimeId
+    });
+    this.dependencies.eventBus.emit({
+      name: "runtime.stopped",
+      payload: {
+        runtimeId: this.runtimeId,
+        occurredAt: new Date().toISOString()
+      }
+    });
   }
 }
