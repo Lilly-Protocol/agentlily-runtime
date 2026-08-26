@@ -124,3 +124,41 @@ describe("AgentRuntime", () => {
     });
   });
 });
+
+  it("emits runtime.task.received before runtime.task.completed in happy path", async () => {
+    const eventBus = new RuntimeEventBus();
+    const events: string[] = [];
+    eventBus.on("runtime.task.received", (e) => events.push(e.name));
+    eventBus.on("runtime.task.completed", (e) => events.push(e.name));
+    eventBus.on("runtime.task.failed", (e) => events.push(e.name));
+
+    const runtime = new AgentRuntime({ runtimeId: "order-happy", eventBus });
+    runtime.registerTool({ name: "ok", description: "succeeds", execute: () => ({ ok: true }) });
+    await runtime.start();
+    await runtime.executeTask({ taskId: "t1", agentId: "a1", toolName: "ok", input: "go", payload: {} });
+
+    const receivedIdx = events.indexOf("runtime.task.received");
+    const completedIdx = events.indexOf("runtime.task.completed");
+    expect(receivedIdx).toBeGreaterThanOrEqual(0);
+    expect(completedIdx).toBeGreaterThan(receivedIdx);
+  });
+
+  it("emits runtime.task.received before runtime.task.failed in failure path", async () => {
+    const eventBus = new RuntimeEventBus();
+    const events: string[] = [];
+    eventBus.on("runtime.task.received", (e) => events.push(e.name));
+    eventBus.on("runtime.task.completed", (e) => events.push(e.name));
+    eventBus.on("runtime.task.failed", (e) => events.push(e.name));
+
+    const runtime = new AgentRuntime({ runtimeId: "order-fail", eventBus });
+    runtime.registerTool({ name: "boom", description: "throws", execute: () => { throw new Error("fail"); } });
+    await runtime.start();
+    await expect(runtime.executeTask({ taskId: "t2", agentId: "a2", toolName: "boom", input: "go", payload: {} })).rejects.toThrow();
+
+    const receivedIdx = events.indexOf("runtime.task.received");
+    const failedIdx = events.indexOf("runtime.task.failed");
+    const completedIdx = events.indexOf("runtime.task.completed");
+    expect(receivedIdx).toBeGreaterThanOrEqual(0);
+    expect(failedIdx).toBeGreaterThan(receivedIdx);
+    expect(completedIdx).toBe(-1);
+  });
