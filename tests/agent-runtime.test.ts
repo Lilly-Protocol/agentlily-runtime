@@ -124,3 +124,41 @@ describe("AgentRuntime", () => {
     });
   });
 });
+
+  it("handles parallel executeTask calls with correct per-task results and memory entries (Issue #123)", async () => {
+    const runtime = new AgentRuntime({ runtimeId: "concurrency-test" });
+    runtime.registerTool({
+      name: "double",
+      description: "Doubles the input number",
+      execute: ({ payload }) => ({ result: (payload as any).n * 2 }),
+    });
+    await runtime.start();
+
+    const taskCount = 20;
+    const promises = Array.from({ length: taskCount }, (_, i) =>
+      runtime.executeTask({
+        taskId: `task-${i}`,
+        agentId: "agent-concurrent",
+        toolName: "double",
+        input: `compute ${i}`,
+        payload: { n: i },
+      })
+    );
+
+    const results = await Promise.all(promises);
+
+    // Verify each result is correct
+    for (let i = 0; i < taskCount; i++) {
+      expect(results[i].output).toEqual({ result: i * 2 });
+      expect(results[i].taskId).toBe(`task-${i}`);
+    }
+
+    // Verify all memory entries recorded
+    const memory = await runtime.getDependencies().memoryStore.listByAgent("agent-concurrent");
+    expect(memory).toHaveLength(taskCount);
+
+    const taskIds = new Set(memory.map((m) => m.taskId));
+    for (let i = 0; i < taskCount; i++) {
+      expect(taskIds.has(`task-${i}`)).toBe(true);
+    }
+  });
