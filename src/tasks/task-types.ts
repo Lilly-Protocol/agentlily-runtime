@@ -11,5 +11,8 @@ export interface TaskExecutionResult<TResult = unknown> {
   agentId: string;
   toolName: string;
   output: TResult;
+  startedAt: string;
   completedAt: string;
+  /** Duration of task execution in milliseconds. Always >= 0. */
+  durationMs: number;
 }
