@@ -6,9 +6,15 @@ import { createRuntimeDependencies } from "./bootstrap.js";
 import type { RuntimeContext } from "./context.js";
 import type { RuntimeOptions } from "./types.js";
 
+export interface RuntimeStopOptions {
+  clearListeners?: boolean;
+  drainTimeoutMs?: number;
+}
+
 export class AgentRuntime {
   private readonly dependencies;
   private readonly runtimeId: string;
+  private readonly inFlightTasks = new Set<string>();
   private started = false;
 
   public constructor(options: RuntimeOptions) {
@@ -20,6 +26,14 @@ export class AgentRuntime {
     tool: ToolDefinition<TPayload, TResult>
   ): void {
     this.dependencies.toolRegistry.register(tool);
+  }
+
+  public isRunning(): boolean {
+    return this.started;
+  }
+
+  public getInFlightTaskCount(): number {
+    return this.inFlightTasks.size;
   }
 
   public async start(): Promise<void> {
@@ -43,9 +57,17 @@ export class AgentRuntime {
     });
   }
 
-  public async stop(): Promise<void> {
+  public async stop(options: RuntimeStopOptions = {}): Promise<void> {
     if (!this.started) {
       return;
+    }
+
+    // Drain in-flight tasks if requested
+    if (options.drainTimeoutMs && options.drainTimeoutMs > 0 && this.inFlightTasks.size > 0) {
+      const startTime = Date.now();
+      while (this.inFlightTasks.size > 0 && Date.now() - startTime < options.drainTimeoutMs) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
     }
 
     this.started = false;
@@ -60,6 +82,10 @@ export class AgentRuntime {
         occurredAt
       }
     });
+
+    if (options.clearListeners) {
+      this.dependencies.eventBus.clear();
+    }
   }
 
   public async executeTask<TPayload, TResult>(
@@ -93,6 +119,7 @@ export class AgentRuntime {
       toolName: task.toolName
     });
 
+    this.inFlightTasks.add(task.taskId);
     try {
       const result = await this.dependencies.taskRunner.run<TPayload, TResult>(
         task,
@@ -130,6 +157,8 @@ export class AgentRuntime {
       });
 
       throw error;
+    } finally {
+      this.inFlightTasks.delete(task.taskId);
     }
   }
 

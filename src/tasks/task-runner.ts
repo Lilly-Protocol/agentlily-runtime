@@ -6,10 +6,16 @@ import type { RuntimeContext } from "../runtime/context.js";
 import type { RuntimeTask, TaskExecutionResult } from "./task-types.js";
 
 export class TaskRunner {
+  private readonly actionExecutor: ActionExecutor;
+  private readonly memoryStore: MemoryStore;
+
   public constructor(
-    private readonly actionExecutor: ActionExecutor,
-    private readonly memoryStore: MemoryStore
-  ) {}
+    actionExecutor: ActionExecutor,
+    memoryStore: MemoryStore
+  ) {
+    this.actionExecutor = actionExecutor;
+    this.memoryStore = memoryStore;
+  }
 
   public async run<TPayload, TResult>(
     task: RuntimeTask<TPayload>,
