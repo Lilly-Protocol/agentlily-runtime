@@ -20,6 +20,9 @@ export class TaskRunner {
     assertNonEmptyValue(task.toolName, "toolName");
     assertNonEmptyValue(task.input, "input");
 
+    const startTime = performance.now();
+    const startedAt = new Date().toISOString();
+
     try {
       const output = await this.actionExecutor.execute<TPayload, TResult>(
         task.toolName,
@@ -27,7 +30,9 @@ export class TaskRunner {
         context
       );
 
+      const endTime = performance.now();
       const completedAt = new Date().toISOString();
+      const durationMs = Math.max(0, Math.round(endTime - startTime));
 
       await this.memoryStore.append({
         agentId: task.agentId,
@@ -42,7 +47,9 @@ export class TaskRunner {
         agentId: task.agentId,
         toolName: task.toolName,
         output,
-        completedAt
+        startedAt,
+        completedAt,
+        durationMs
       };
     } catch (error) {
       if (error instanceof RuntimeError) {
