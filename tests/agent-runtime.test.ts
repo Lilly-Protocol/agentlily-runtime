@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   AgentRuntime,
+  createPaymentPrepTool,
   InMemoryRuntimeLogger,
+  PAYMENT_PREP_TOOL_NAME,
   RuntimeEventBus
 } from "../src/index.js";
+import type { PaymentPrepPayload, PaymentPrepResult } from "../src/index.js";
 
 describe("AgentRuntime", () => {
   it("executes a happy-path task and records memory", async () => {
@@ -122,5 +125,38 @@ describe("AgentRuntime", () => {
     ).rejects.toMatchObject({
       code: "TOOL_NOT_FOUND"
     });
+  });
+
+  it("registers and executes payment prep action through runtime", async () => {
+    const runtime = new AgentRuntime({ runtimeId: "runtime-payment-test" });
+    runtime.registerTool(createPaymentPrepTool());
+    await runtime.start();
+
+    const result = await runtime.executeTask<
+      PaymentPrepPayload,
+      PaymentPrepResult
+    >({
+      taskId: "task-pay-exec",
+      agentId: "agent-pay",
+      toolName: PAYMENT_PREP_TOOL_NAME,
+      input: "Prepare payment transaction",
+      payload: {
+        walletId: "GWALLET999",
+        amount: "50.00",
+        recipientId: "GRECEIVER111"
+      }
+    });
+
+    expect(result.output.status).toBe("prepared");
+    expect(result.output.amount).toBe("50.00");
+    expect(result.output.walletId).toBe("GWALLET999");
+    expect(result.output.recipientId).toBe("GRECEIVER111");
+    expect(result.output.assetCode).toBe("XLM");
+
+    const memory = await runtime
+      .getDependencies()
+      .memoryStore.listByAgent("agent-pay");
+    expect(memory).toHaveLength(1);
+    expect(memory[0]?.taskId).toBe("task-pay-exec");
   });
 });
