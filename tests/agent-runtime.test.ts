@@ -1,3 +1,7 @@
+import { existsSync } from "node:fs";
+import { rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   AgentRuntime,
@@ -122,5 +126,51 @@ describe("AgentRuntime", () => {
     ).rejects.toMatchObject({
       code: "TOOL_NOT_FOUND"
     });
+  });
+
+  it("configures and persists task execution with memoryStoragePath", async () => {
+    const storagePath = join(
+      tmpdir(),
+      `agentlily-runtime-test-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      "persisted-memory.json"
+    );
+
+    try {
+      const runtime = new AgentRuntime({
+        runtimeId: "runtime-durable-test",
+        memoryStoragePath: storagePath
+      });
+
+      runtime.registerTool({
+        name: "save-action",
+        description: "Action to save",
+        execute({ payload }) {
+          return { saved: payload };
+        }
+      });
+
+      await runtime.start();
+
+      await runtime.executeTask({
+        taskId: "task-durable-1",
+        agentId: "agent-durable",
+        toolName: "save-action",
+        input: "Run durable task",
+        payload: { item: "important-state" }
+      });
+
+      const entries = await runtime
+        .getDependencies()
+        .memoryStore.listByAgent("agent-durable");
+
+      expect(entries).toHaveLength(1);
+      expect(entries[0]?.taskId).toBe("task-durable-1");
+      expect(existsSync(storagePath)).toBe(true);
+    } finally {
+      const parentDir = join(storagePath, "..");
+      if (existsSync(parentDir)) {
+        await rm(parentDir, { recursive: true, force: true });
+      }
+    }
   });
 });

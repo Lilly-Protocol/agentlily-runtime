@@ -7,6 +7,7 @@ import type { RuntimeStateStore } from "../state/runtime-state.js";
 export interface RuntimeOptions {
   runtimeId: string;
   memoryStore?: MemoryStore;
+  memoryStoragePath?: string | undefined;
   modelProvider?: ModelProvider;
   logger?: RuntimeLogger;
   stateStore?: RuntimeStateStore;

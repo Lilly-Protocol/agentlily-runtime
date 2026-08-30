@@ -9,7 +9,10 @@ export { ActionExecutor } from "./actions/action-executor.js";
 export { RuntimeError } from "./errors/runtime-errors.js";
 export { RuntimeEventBus } from "./events/runtime-events.js";
 export { InMemoryRuntimeLogger } from "./logger/runtime-logger.js";
-export { InMemoryMemoryStore } from "./memory/memory-store.js";
+export {
+  InMemoryMemoryStore,
+  JsonFileMemoryStore
+} from "./memory/memory-store.js";
 export { UnconfiguredModelProvider } from "./providers/model-provider.js";
 export { InMemoryRuntimeStateStore } from "./state/runtime-state.js";
 export { TaskRunner } from "./tasks/task-runner.js";
