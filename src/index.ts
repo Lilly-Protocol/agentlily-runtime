@@ -11,6 +11,7 @@ export { RuntimeEventBus } from "./events/runtime-events.js";
 export { InMemoryRuntimeLogger } from "./logger/runtime-logger.js";
 export { InMemoryMemoryStore } from "./memory/memory-store.js";
 export { UnconfiguredModelProvider } from "./providers/model-provider.js";
+export { OpenAICompatibleModelProvider } from "./providers/openai-compatible-provider.js";
 export { InMemoryRuntimeStateStore } from "./state/runtime-state.js";
 export { TaskRunner } from "./tasks/task-runner.js";
 export { ToolRegistry } from "./tools/tool-registry.js";
@@ -29,6 +30,7 @@ export type {
   ModelProvider,
   ModelResponse
 } from "./providers/model-provider.js";
+export type { OpenAICompatibleProviderOptions } from "./providers/openai-compatible-provider.js";
 export type { RuntimeStateStore } from "./state/runtime-state.js";
 export type { RuntimeTask, TaskExecutionResult } from "./tasks/task-types.js";
 export type { ToolDefinition, ToolInvocation } from "./tools/types.js";
