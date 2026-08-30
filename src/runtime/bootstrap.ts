@@ -18,7 +18,10 @@ export function createRuntimeDependencies(options: RuntimeOptions) {
   const stateStore = options.stateStore ?? new InMemoryRuntimeStateStore();
   const eventBus = options.eventBus ?? new RuntimeEventBus();
   const agentManager = new AgentInstanceManager();
-  const actionExecutor = new ActionExecutor(toolRegistry);
+  const actionExecutor = new ActionExecutor(
+    toolRegistry,
+    options.maxToolCallsPerTask
+  );
   const taskRunner = new TaskRunner(actionExecutor, memoryStore);
 
   return {

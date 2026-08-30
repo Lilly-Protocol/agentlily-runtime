@@ -123,4 +123,59 @@ describe("AgentRuntime", () => {
       code: "TOOL_NOT_FOUND"
     });
   });
+
+  it("enforces maxToolCallsPerTask runtime policy guard during task execution", async () => {
+    const eventBus = new RuntimeEventBus();
+    let failureReason = "";
+    eventBus.on("runtime.task.failed", (event) => {
+      failureReason = String((event.payload as { reason?: string }).reason);
+    });
+
+    const runtime = new AgentRuntime({
+      runtimeId: "runtime-max-tool-guard",
+      maxToolCallsPerTask: 1,
+      eventBus
+    });
+
+    runtime.registerTool({
+      name: "tool-a",
+      description: "First tool",
+      async execute({ context }) {
+        // Attempt a nested second tool call during the same task
+        const actionExecutor = runtime.getDependencies().actionExecutor;
+        await actionExecutor.execute("tool-b", {}, context);
+        return { ok: true };
+      }
+    });
+
+    runtime.registerTool({
+      name: "tool-b",
+      description: "Second tool",
+      execute() {
+        return { ok: true };
+      }
+    });
+
+    await runtime.start();
+
+    await expect(
+      runtime.executeTask({
+        taskId: "task-limit-test",
+        agentId: "agent-test",
+        toolName: "tool-a",
+        input: "Run nested tools",
+        payload: {}
+      })
+    ).rejects.toMatchObject({
+      code: "MAX_TOOL_CALLS_EXCEEDED",
+      details: {
+        currentToolCalls: 1,
+        maxToolCalls: 1
+      }
+    });
+
+    expect(failureReason).toContain(
+      "Task exceeded maximum allowed tool calls limit of 1."
+    );
+  });
 });

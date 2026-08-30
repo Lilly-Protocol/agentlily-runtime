@@ -4,7 +4,8 @@ export type RuntimeErrorCode =
   | "TOOL_NOT_FOUND"
   | "DUPLICATE_TOOL"
   | "INVALID_TASK"
-  | "EXECUTION_FAILED";
+  | "EXECUTION_FAILED"
+  | "MAX_TOOL_CALLS_EXCEEDED";
 
 export class RuntimeError extends Error {
   public readonly code: RuntimeErrorCode;

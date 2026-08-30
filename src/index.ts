@@ -14,6 +14,11 @@ export { UnconfiguredModelProvider } from "./providers/model-provider.js";
 export { InMemoryRuntimeStateStore } from "./state/runtime-state.js";
 export { TaskRunner } from "./tasks/task-runner.js";
 export { ToolRegistry } from "./tools/tool-registry.js";
+export {
+  assertMaxToolCalls,
+  assertNonEmptyValue,
+  assertRuntimeStarted
+} from "./guards/runtime-guards.js";
 
 export type { AgentInstance } from "./agents/agent-instance-manager.js";
 export type { RuntimeErrorCode } from "./errors/runtime-errors.js";
