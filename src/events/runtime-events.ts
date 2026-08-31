@@ -1,6 +1,8 @@
 export interface RuntimeEventMap {
   "runtime.started": { runtimeId: string; occurredAt: string };
+  "runtime.stopped": { runtimeId: string; occurredAt: string };
   "runtime.task.received": {
+
     runtimeId: string;
     taskId: string;
     agentId: string;
