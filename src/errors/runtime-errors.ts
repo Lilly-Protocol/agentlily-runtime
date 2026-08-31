@@ -20,4 +20,26 @@ export class RuntimeError extends Error {
     this.code = code;
     this.details = details;
   }
+
+  /**
+   * Serializes the error losslessly for logs and API responses.
+   *
+   * Without this, `JSON.stringify(new RuntimeError(...))` drops `code` and
+   * `details` because only `message` is an enumerable own property on `Error`.
+   */
+  public toJSON(): {
+    name: string;
+    code: RuntimeErrorCode;
+    message: string;
+    details: Record<string, unknown> | undefined;
+    stack: string | undefined;
+  } {
+    return {
+      name: this.name,
+      code: this.code,
+      message: this.message,
+      details: this.details,
+      stack: this.stack
+    };
+  }
 }
