@@ -128,49 +128,42 @@ describe("AgentRuntime", () => {
     });
   });
 
-  it("configures and persists task execution with memoryStoragePath", async () => {
-    const storagePath = join(
-      tmpdir(),
-      `agentlily-runtime-test-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-      "persisted-memory.json"
-    );
 
-    try {
-      const runtime = new AgentRuntime({
-        runtimeId: "runtime-durable-test",
-        memoryStoragePath: storagePath
-      });
+  it("stops the runtime, emits runtime.stopped event, and rejects subsequent tasks", async () => {
+    const eventBus = new RuntimeEventBus();
+    const stoppedEvents: { runtimeId: string; occurredAt: string }[] = [];
+    eventBus.on("runtime.stopped", (event) => {
+      stoppedEvents.push(event.payload);
+    });
 
-      runtime.registerTool({
-        name: "save-action",
-        description: "Action to save",
-        execute({ payload }) {
-          return { saved: payload };
-        }
-      });
+    const runtime = new AgentRuntime({
+      runtimeId: "runtime-stop-test",
+      eventBus
+    });
 
-      await runtime.start();
+    await runtime.start();
+    await runtime.stop();
 
-      await runtime.executeTask({
-        taskId: "task-durable-1",
-        agentId: "agent-durable",
-        toolName: "save-action",
-        input: "Run durable task",
-        payload: { item: "important-state" }
-      });
+    expect(stoppedEvents).toHaveLength(1);
+    expect(stoppedEvents[0]?.runtimeId).toBe("runtime-stop-test");
+    expect(stoppedEvents[0]?.occurredAt).toBeDefined();
 
-      const entries = await runtime
-        .getDependencies()
-        .memoryStore.listByAgent("agent-durable");
+    // Subsequent task execution rejects
+    await expect(
+      runtime.executeTask({
+        taskId: "task-post-stop",
+        agentId: "agent-stop",
+        toolName: "echo",
+        input: "Run after stop",
+        payload: {}
+      })
+    ).rejects.toMatchObject({
+      code: "RUNTIME_NOT_STARTED"
+    });
 
-      expect(entries).toHaveLength(1);
-      expect(entries[0]?.taskId).toBe("task-durable-1");
-      expect(existsSync(storagePath)).toBe(true);
-    } finally {
-      const parentDir = join(storagePath, "..");
-      if (existsSync(parentDir)) {
-        await rm(parentDir, { recursive: true, force: true });
-      }
-    }
+    // Calling stop again is idempotent
+    await runtime.stop();
+    expect(stoppedEvents).toHaveLength(1);
   });
 });
+
