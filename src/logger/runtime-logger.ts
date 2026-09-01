@@ -1,48 +1,63 @@
 export interface RuntimeLogger {
-  info(message: string, metadata?: Record<string, unknown>): void;
-  error(message: string, metadata?: Record<string, unknown>): void;
+ info(message: string, metadata?: Record<string, unknown>): void;
+ error(message: string, metadata?: Record<string, unknown>): void;
 }
 
-const DEFAULT_REDACT_PATTERN = /secret|token|password|apiKey|api_key|authorization/i;
+export type LogLevel = "info" | "warn" | "error";
+
+const LOG_LEVEL_PRIORITY: Record<LogLevel, number> = {
+  info: 0,
+  warn: 1,
+  error: 2,
+};
 
 export interface ConsoleRuntimeLoggerOptions {
-  /** Regex pattern matching metadata keys to redact. Default matches secret/token/password/apiKey/authorization. */
-  redactKeys?: RegExp;
+  level?: LogLevel;
 }
 
-function redactMetadata(
-  metadata: Record<string, unknown>,
-  pattern: RegExp
-): Record<string, unknown> {
-  const result: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(metadata)) {
-    if (pattern.test(key)) {
-      result[key] = "[REDACTED]";
-    } else if (value !== null && typeof value === "object" && !Array.isArray(value)) {
-      result[key] = redactMetadata(value as Record<string, unknown>, pattern);
-    } else {
-      result[key] = value;
-    }
-  }
-  return result;
+export type RuntimeLogLevel = "info" | "warn" | "error";
+
+export interface ConsoleRuntimeLoggerOptions {
+  level?: RuntimeLogLevel;
 }
+
+const levelPriority: Record<RuntimeLogLevel, number> = {
+  info: 0,
+  warn: 1,
+  error: 2
+};
 
 export class ConsoleRuntimeLogger implements RuntimeLogger {
-  private readonly redactPattern: RegExp;
+  private readonly minimumLevel: RuntimeLogLevel;
 
-  public constructor(options?: ConsoleRuntimeLoggerOptions) {
-    this.redactPattern = options?.redactKeys ?? DEFAULT_REDACT_PATTERN;
+  public constructor(options: ConsoleRuntimeLoggerOptions = {}) {
+    this.minimumLevel = options.level ?? "info";
   }
 
   public info(message: string, metadata?: Record<string, unknown>): void {
-    const safeMeta = metadata ? redactMetadata(metadata, this.redactPattern) : {};
-    console.info(message, safeMeta);
+    if (this.shouldLog("info")) {
+      console.info(message, metadata ?? {});
+    }
+  }
+
+  public warn(message: string, metadata?: Record<string, unknown>): void {
+    if (!this.shouldLog("warn")) return;
+    console.warn(message, metadata ?? {});
   }
 
   public error(message: string, metadata?: Record<string, unknown>): void {
-    const safeMeta = metadata ? redactMetadata(metadata, this.redactPattern) : {};
-    console.error(message, safeMeta);
+    if (this.shouldLog("error")) {
+      console.error(message, metadata ?? {});
+    }
   }
+
+  private shouldLog(level: "info" | "error"): boolean {
+    return levelPriority[level] >= levelPriority[this.minimumLevel];
+  }
+}
+
+export interface InMemoryRuntimeLoggerOptions {
+  maxEntries?: number;
 }
 
 export class InMemoryRuntimeLogger implements RuntimeLogger {
@@ -51,12 +66,36 @@ export class InMemoryRuntimeLogger implements RuntimeLogger {
     message: string;
     metadata: Record<string, unknown> | undefined;
   }> = [];
+  private readonly maxEntries: number;
+
+  public constructor(options: InMemoryRuntimeLoggerOptions = {}) {
+    this.maxEntries = options.maxEntries ?? 5_000;
+  }
 
   public info(message: string, metadata?: Record<string, unknown>): void {
-    this.entries.push({ level: "info", message, metadata });
+    this.appendEntry("info", message, metadata);
   }
 
   public error(message: string, metadata?: Record<string, unknown>): void {
-    this.entries.push({ level: "error", message, metadata });
+    this.appendEntry("error", message, metadata);
+  }
+
+  public clear(): void {
+    this.entries.length = 0;
+  }
+
+  public size(): number {
+    return this.entries.length;
+  }
+
+  private appendEntry(
+    level: "info" | "error",
+    message: string,
+    metadata?: Record<string, unknown>
+  ): void {
+    if (this.maxEntries > 0 && this.entries.length >= this.maxEntries) {
+      this.entries.shift();
+    }
+    this.entries.push({ level, message, metadata });
   }
 }
