@@ -6,9 +6,15 @@ import { createRuntimeDependencies } from "./bootstrap.js";
 import type { RuntimeContext } from "./context.js";
 import type { RuntimeOptions } from "./types.js";
 
+export interface RuntimeStopOptions {
+  clearListeners?: boolean;
+  drainTimeoutMs?: number;
+}
+
 export class AgentRuntime {
   private readonly dependencies;
   private readonly runtimeId: string;
+  private readonly inFlightTasks = new Set<string>();
   private started = false;
   private stopped = false;
 
@@ -21,6 +27,14 @@ export class AgentRuntime {
     tool: ToolDefinition<TPayload, TResult>
   ): void {
     this.dependencies.toolRegistry.register(tool);
+  }
+
+  public isRunning(): boolean {
+    return this.started;
+  }
+
+  public getInFlightTaskCount(): number {
+    return this.inFlightTasks.size;
   }
 
   public async start(): Promise<void> {
@@ -50,7 +64,26 @@ export class AgentRuntime {
     });
   }
 
+  public async stop(): Promise<void> {
+    if (!this.started) {
+      return;
+    }
+
+    this.started = false;
+    this.dependencies.logger.info("Runtime stopped.", {
+      runtimeId: this.runtimeId
+    });
+    this.dependencies.eventBus.emit({
+      name: "runtime.stopped",
+      payload: {
+        runtimeId: this.runtimeId,
+        occurredAt: new Date().toISOString()
+      }
+    });
+  }
+
   public async executeTask<TPayload, TResult>(
+
     task: RuntimeTask<TPayload>
   ): Promise<TaskExecutionResult<TResult>> {
     assertRuntimeStarted(this.started);
@@ -81,6 +114,7 @@ export class AgentRuntime {
       toolName: task.toolName
     });
 
+    this.inFlightTasks.add(task.taskId);
     try {
       const result = await this.dependencies.taskRunner.run<TPayload, TResult>(
         task,
@@ -118,6 +152,8 @@ export class AgentRuntime {
       });
 
       throw error;
+    } finally {
+      this.inFlightTasks.delete(task.taskId);
     }
   }
 
