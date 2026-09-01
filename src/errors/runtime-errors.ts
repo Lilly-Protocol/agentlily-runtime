@@ -21,7 +21,6 @@ export class RuntimeError extends Error {
     this.details = details;
   }
 
-
   public toJSON(): {
     name: string;
     code: RuntimeErrorCode;
@@ -34,7 +33,7 @@ export class RuntimeError extends Error {
       code: this.code,
       message: this.message,
       details: this.details,
-      stack: this.stack,
+      stack: this.stack
     };
   }
 }
