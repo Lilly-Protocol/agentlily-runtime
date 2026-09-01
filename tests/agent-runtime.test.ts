@@ -1,9 +1,16 @@
+import { existsSync } from "node:fs";
+import { rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   AgentRuntime,
+  createPaymentPrepTool,
   InMemoryRuntimeLogger,
+  PAYMENT_PREP_TOOL_NAME,
   RuntimeEventBus
 } from "../src/index.js";
+import type { PaymentPrepPayload, PaymentPrepResult } from "../src/index.js";
 
 describe("AgentRuntime", () => {
   it("executes a happy-path task and records memory", async () => {
@@ -123,4 +130,43 @@ describe("AgentRuntime", () => {
       code: "TOOL_NOT_FOUND"
     });
   });
+
+
+  it("stops the runtime, emits runtime.stopped event, and rejects subsequent tasks", async () => {
+    const eventBus = new RuntimeEventBus();
+    const stoppedEvents: { runtimeId: string; occurredAt: string }[] = [];
+    eventBus.on("runtime.stopped", (event) => {
+      stoppedEvents.push(event.payload);
+    });
+
+    const runtime = new AgentRuntime({
+      runtimeId: "runtime-stop-test",
+      eventBus
+    });
+
+    await runtime.start();
+    await runtime.stop();
+
+    expect(stoppedEvents).toHaveLength(1);
+    expect(stoppedEvents[0]?.runtimeId).toBe("runtime-stop-test");
+    expect(stoppedEvents[0]?.occurredAt).toBeDefined();
+
+    // Subsequent task execution rejects
+    await expect(
+      runtime.executeTask({
+        taskId: "task-post-stop",
+        agentId: "agent-stop",
+        toolName: "echo",
+        input: "Run after stop",
+        payload: {}
+      })
+    ).rejects.toMatchObject({
+      code: "RUNTIME_NOT_STARTED"
+    });
+
+    // Calling stop again is idempotent
+    await runtime.stop();
+    expect(stoppedEvents).toHaveLength(1);
+  });
 });
+

@@ -57,21 +57,12 @@ export class AgentRuntime {
     });
   }
 
-  public async stop(options: RuntimeStopOptions = {}): Promise<void> {
+  public async stop(): Promise<void> {
     if (!this.started) {
       return;
     }
 
-    // Drain in-flight tasks if requested
-    if (options.drainTimeoutMs && options.drainTimeoutMs > 0 && this.inFlightTasks.size > 0) {
-      const startTime = Date.now();
-      while (this.inFlightTasks.size > 0 && Date.now() - startTime < options.drainTimeoutMs) {
-        await new Promise((resolve) => setTimeout(resolve, 10));
-      }
-    }
-
     this.started = false;
-    const occurredAt = new Date().toISOString();
     this.dependencies.logger.info("Runtime stopped.", {
       runtimeId: this.runtimeId
     });
@@ -79,16 +70,13 @@ export class AgentRuntime {
       name: "runtime.stopped",
       payload: {
         runtimeId: this.runtimeId,
-        occurredAt
+        occurredAt: new Date().toISOString()
       }
     });
-
-    if (options.clearListeners) {
-      this.dependencies.eventBus.clear();
-    }
   }
 
   public async executeTask<TPayload, TResult>(
+
     task: RuntimeTask<TPayload>
   ): Promise<TaskExecutionResult<TResult>> {
     assertRuntimeStarted(this.started);

@@ -4,7 +4,8 @@ export type RuntimeErrorCode =
   | "TOOL_NOT_FOUND"
   | "DUPLICATE_TOOL"
   | "INVALID_TASK"
-  | "EXECUTION_FAILED";
+  | "EXECUTION_FAILED"
+  | "MAX_TOOL_CALLS_EXCEEDED";
 
 export class RuntimeError extends Error {
   public readonly code: RuntimeErrorCode;
@@ -20,4 +21,21 @@ export class RuntimeError extends Error {
     this.code = code;
     this.details = details;
   }
+
+  public toJSON(): {
+    name: string;
+    code: RuntimeErrorCode;
+    message: string;
+    details: Record<string, unknown> | undefined;
+    stack: string | undefined;
+  } {
+    return {
+      name: this.name,
+      code: this.code,
+      message: this.message,
+      details: this.details,
+      stack: this.stack
+    };
+  }
 }
+

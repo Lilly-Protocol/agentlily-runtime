@@ -2,6 +2,7 @@ export interface RuntimeEventMap {
   "runtime.started": { runtimeId: string; occurredAt: string };
   "runtime.stopped": { runtimeId: string; occurredAt: string };
   "runtime.task.received": {
+
     runtimeId: string;
     taskId: string;
     agentId: string;
@@ -18,6 +19,11 @@ export interface RuntimeEventMap {
     agentId: string;
     reason: string;
   };
+  "runtime.internal.error": {
+    eventName: string;
+    error: string;
+    occurredAt: string;
+  };
 }
 
 export type RuntimeEventName = keyof RuntimeEventMap;
@@ -33,148 +39,83 @@ export type RuntimeEventListener<TName extends RuntimeEventName> = (
   event: RuntimeEvent<TName>
 ) => void | Promise<void>;
 
-export interface RuntimeEventBusErrorHandler {
-  (error: unknown, event: RuntimeEvent<RuntimeEventName>): void;
+export interface RuntimeEventBusOptions {
+  /** Maximum listener registrations allowed per event name before warning. Defaults to 100. */
+  maxListeners?: number;
 }
+
+export const DEFAULT_MAX_LISTENERS = 100;
 
 export class RuntimeEventBus {
   private readonly listeners = new Map<
     RuntimeEventName,
     Set<RuntimeEventListener<RuntimeEventName>>
   >();
-  private errorHandler?: RuntimeEventBusErrorHandler;
+  private readonly maxListeners: number;
+  private isEmittingInternalError = false;
 
-  public constructor(errorHandler?: RuntimeEventBusErrorHandler) {
-    this.errorHandler = errorHandler;
-  }
-
-  public setErrorHandler(handler?: RuntimeEventBusErrorHandler): void {
-    this.errorHandler = handler;
+  public constructor(options?: RuntimeEventBusOptions) {
+    this.maxListeners = options?.maxListeners ?? DEFAULT_MAX_LISTENERS;
   }
 
   public on<TName extends RuntimeEventName>(
     name: TName,
     listener: RuntimeEventListener<TName>
   ): () => void {
-    let existing = this.listeners.get(name);
-    if (!existing) {
-      existing = new Set();
-      this.listeners.set(name, existing);
+    const existing = this.listeners.get(name) ?? new Set();
+    if (existing.size >= this.maxListeners) {
+      console.warn(
+        `[RuntimeEventBus] Warning: Event "${name}" reached maximum listener limit (${this.maxListeners}).`
+      );
     }
-    const genericListener = listener as RuntimeEventListener<RuntimeEventName>;
-    existing.add(genericListener);
+    existing.add(listener as RuntimeEventListener<RuntimeEventName>);
+    this.listeners.set(name, existing);
 
     return () => {
       this.off(name, listener);
     };
   }
 
-  public once<TName extends RuntimeEventName>(
-    name: TName,
-    listener: RuntimeEventListener<TName>
-  ): () => void {
-    const unsubscribe = this.on(name, ((event: RuntimeEvent<TName>) => {
-      unsubscribe();
-      return listener(event);
-    }) as RuntimeEventListener<TName>);
-
-    return unsubscribe;
-  }
-
-  public off<TName extends RuntimeEventName>(
-    name: TName,
-    listener: RuntimeEventListener<TName>
-  ): boolean {
-    const existing = this.listeners.get(name);
-    if (!existing) {
-      return false;
-    }
-
-    const removed = existing.delete(
-      listener as RuntimeEventListener<RuntimeEventName>
-    );
-
-    if (existing.size === 0) {
-      this.listeners.delete(name);
-    }
-
-    return removed;
-  }
-
-  public removeAllListeners(name?: RuntimeEventName): void {
-    if (name) {
-      this.listeners.delete(name);
-    } else {
-      this.listeners.clear();
-    }
-  }
-
-  public clear(): void {
-    this.removeAllListeners();
-  }
-
-  public listenerCount(name?: RuntimeEventName): number {
-    if (name) {
-      return this.listeners.get(name)?.size ?? 0;
-    }
-
-    let count = 0;
-    for (const set of this.listeners.values()) {
-      count += set.size;
-    }
-    return count;
+  public listenerCount(name: RuntimeEventName): number {
+    return this.listeners.get(name)?.size ?? 0;
   }
 
   public emit<TName extends RuntimeEventName>(
     event: RuntimeEvent<TName>
   ): void {
-    const listeners = this.listeners.get(event.name);
-    if (!listeners || listeners.size === 0) {
+    const listenerSet = this.listeners.get(event.name);
+    if (!listenerSet || listenerSet.size === 0) {
       return;
     }
 
-    // Defensive copy to prevent concurrent modification during dispatch
-    const snapshot = Array.from(listeners);
+    const snapshot = Array.from(listenerSet);
 
     for (const listener of snapshot) {
       try {
-        const result = listener(
-          event as unknown as RuntimeEvent<RuntimeEventName>
-        );
-        if (result !== undefined && typeof (result as Promise<void>)?.then === "function") {
-          void (result as Promise<void>).catch((err: unknown) => {
-            if (this.errorHandler) {
-              this.errorHandler(err, event as unknown as RuntimeEvent<RuntimeEventName>);
-            }
-          });
-        }
+        listener(event);
       } catch (err) {
-        if (this.errorHandler) {
-          this.errorHandler(err, event as unknown as RuntimeEvent<RuntimeEventName>);
+        const errorMsg = err instanceof Error ? err.message : String(err);
+
+        if (event.name !== "runtime.internal.error" && !this.isEmittingInternalError) {
+          try {
+            this.isEmittingInternalError = true;
+            this.emit({
+              name: "runtime.internal.error",
+              payload: {
+                eventName: event.name,
+                error: errorMsg,
+                occurredAt: new Date().toISOString()
+              }
+            });
+          } finally {
+            this.isEmittingInternalError = false;
+          }
         }
       }
     }
   }
 
-  public async emitAsync<TName extends RuntimeEventName>(
-    event: RuntimeEvent<TName>
-  ): Promise<PromiseSettledResult<void>[]> {
-    const listeners = this.listeners.get(event.name);
-    if (!listeners || listeners.size === 0) {
-      return [];
-    }
-
-    const snapshot = Array.from(listeners);
-    const promises = snapshot.map((listener) => {
-      try {
-        return Promise.resolve(
-          listener(event as unknown as RuntimeEvent<RuntimeEventName>)
-        );
-      } catch (err) {
-        return Promise.reject(err);
-      }
-    });
-
-    return Promise.allSettled(promises);
+  public listenerCount(name: RuntimeEventName): number {
+    return this.listeners.get(name)?.size ?? 0;
   }
 }

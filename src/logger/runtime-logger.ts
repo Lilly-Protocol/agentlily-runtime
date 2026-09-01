@@ -3,13 +3,39 @@ export interface RuntimeLogger {
   error(message: string, metadata?: Record<string, unknown>): void;
 }
 
+export type RuntimeLogLevel = "info" | "warn" | "error";
+
+export interface ConsoleRuntimeLoggerOptions {
+  level?: RuntimeLogLevel;
+}
+
+const levelPriority: Record<RuntimeLogLevel, number> = {
+  info: 0,
+  warn: 1,
+  error: 2
+};
+
 export class ConsoleRuntimeLogger implements RuntimeLogger {
+  private readonly minimumLevel: RuntimeLogLevel;
+
+  public constructor(options: ConsoleRuntimeLoggerOptions = {}) {
+    this.minimumLevel = options.level ?? "info";
+  }
+
   public info(message: string, metadata?: Record<string, unknown>): void {
-    console.info(message, metadata ?? {});
+    if (this.shouldLog("info")) {
+      console.info(message, metadata ?? {});
+    }
   }
 
   public error(message: string, metadata?: Record<string, unknown>): void {
-    console.error(message, metadata ?? {});
+    if (this.shouldLog("error")) {
+      console.error(message, metadata ?? {});
+    }
+  }
+
+  private shouldLog(level: "info" | "error"): boolean {
+    return levelPriority[level] >= levelPriority[this.minimumLevel];
   }
 }
 
