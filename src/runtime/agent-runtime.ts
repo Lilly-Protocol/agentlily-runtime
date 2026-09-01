@@ -6,10 +6,17 @@ import { createRuntimeDependencies } from "./bootstrap.js";
 import type { RuntimeContext } from "./context.js";
 import type { RuntimeOptions } from "./types.js";
 
+export interface RuntimeStopOptions {
+  clearListeners?: boolean;
+  drainTimeoutMs?: number;
+}
+
 export class AgentRuntime {
   private readonly dependencies;
   private readonly runtimeId: string;
+  private readonly inFlightTasks = new Set<string>();
   private started = false;
+  private stopped = false;
 
   public constructor(options: RuntimeOptions) {
     this.runtimeId = options.runtimeId;
@@ -22,11 +29,25 @@ export class AgentRuntime {
     this.dependencies.toolRegistry.register(tool);
   }
 
+  public isRunning(): boolean {
+    return this.started;
+  }
+
+  public getInFlightTaskCount(): number {
+    return this.inFlightTasks.size;
+  }
+
   public async start(): Promise<void> {
     if (this.started) {
       throw new RuntimeError(
         "RUNTIME_ALREADY_STARTED",
         "AgentRuntime has already been started."
+      );
+    }
+    if (this.stopped) {
+      throw new RuntimeError(
+        "RUNTIME_ALREADY_STOPPED",
+        "AgentRuntime has already been stopped and cannot be restarted."
       );
     }
 
@@ -43,7 +64,26 @@ export class AgentRuntime {
     });
   }
 
+  public async stop(): Promise<void> {
+    if (!this.started) {
+      return;
+    }
+
+    this.started = false;
+    this.dependencies.logger.info("Runtime stopped.", {
+      runtimeId: this.runtimeId
+    });
+    this.dependencies.eventBus.emit({
+      name: "runtime.stopped",
+      payload: {
+        runtimeId: this.runtimeId,
+        occurredAt: new Date().toISOString()
+      }
+    });
+  }
+
   public async executeTask<TPayload, TResult>(
+
     task: RuntimeTask<TPayload>
   ): Promise<TaskExecutionResult<TResult>> {
     assertRuntimeStarted(this.started);
@@ -74,11 +114,19 @@ export class AgentRuntime {
       toolName: task.toolName
     });
 
+    this.inFlightTasks.add(task.taskId);
     try {
       const result = await this.dependencies.taskRunner.run<TPayload, TResult>(
         task,
         context
       );
+
+      this.dependencies.logger.info("Runtime task completed.", {
+        runtimeId: this.runtimeId,
+        taskId: task.taskId,
+        toolName: task.toolName,
+        durationMs: result.durationMs
+      });
 
       this.dependencies.eventBus.emit({
         name: "runtime.task.completed",
@@ -86,7 +134,8 @@ export class AgentRuntime {
           runtimeId: this.runtimeId,
           taskId: task.taskId,
           agentId: task.agentId,
-          toolName: task.toolName
+          toolName: task.toolName,
+          durationMs: result.durationMs
         }
       });
 
@@ -111,6 +160,8 @@ export class AgentRuntime {
       });
 
       throw error;
+    } finally {
+      this.inFlightTasks.delete(task.taskId);
     }
   }
 
@@ -120,5 +171,24 @@ export class AgentRuntime {
 
   public getDependencies() {
     return this.dependencies;
+  }
+
+  public async stop(): Promise<void> {
+    if (!this.started || this.stopped) {
+      return;
+    }
+
+    this.stopped = true;
+    this.started = false;
+    this.dependencies.logger.info("Runtime stopped.", {
+      runtimeId: this.runtimeId
+    });
+    this.dependencies.eventBus.emit({
+      name: "runtime.stopped",
+      payload: {
+        runtimeId: this.runtimeId,
+        occurredAt: new Date().toISOString()
+      }
+    });
   }
 }

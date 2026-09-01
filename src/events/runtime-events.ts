@@ -1,6 +1,12 @@
 export interface RuntimeEventMap {
+  "runtime.internal.error": {
+    eventName: RuntimeEventName;
+    message: string;
+  };
   "runtime.started": { runtimeId: string; occurredAt: string };
+  "runtime.stopped": { runtimeId: string; occurredAt: string };
   "runtime.task.received": {
+
     runtimeId: string;
     taskId: string;
     agentId: string;
@@ -19,7 +25,8 @@ export interface RuntimeEventMap {
   };
   "runtime.internal.error": {
     eventName: string;
-    errorMessage: string;
+    error: string;
+    occurredAt: string;
   };
 }
 
@@ -34,52 +41,108 @@ export interface RuntimeEvent<
 
 export type RuntimeEventListener<TName extends RuntimeEventName> = (
   event: RuntimeEvent<TName>
-) => void;
+) => void | Promise<void>;
+
+export interface RuntimeEventBusOptions {
+  /** Maximum listener registrations allowed per event name before warning. Defaults to 100. */
+  maxListeners?: number;
+}
+
+export const DEFAULT_MAX_LISTENERS = 100;
+
+const DEFAULT_MAX_LISTENERS = 100;
+
+export interface RuntimeEventBusOptions {
+  /** Maximum number of listeners allowed for each event name. */
+  maxListeners?: number;
+}
+
+export class RuntimeEventListenerLimitError extends Error {
+  public readonly eventName: RuntimeEventName;
+  public readonly maxListeners: number;
+
+  public constructor(eventName: RuntimeEventName, maxListeners: number) {
+    super(
+      `Cannot add listener for "${eventName}": the limit of ${maxListeners} listeners has been reached.`
+    );
+    this.name = "RuntimeEventListenerLimitError";
+    this.eventName = eventName;
+    this.maxListeners = maxListeners;
+  }
+}
 
 export class RuntimeEventBus {
+  public static readonly defaultMaxListeners = 100;
+
   private readonly listeners = new Map<
     RuntimeEventName,
     Set<RuntimeEventListener<RuntimeEventName>>
   >();
+  private readonly maxListeners: number;
+  private isEmittingInternalError = false;
+
+  public constructor(options?: RuntimeEventBusOptions) {
+    this.maxListeners = options?.maxListeners ?? DEFAULT_MAX_LISTENERS;
+  }
 
   public on<TName extends RuntimeEventName>(
     name: TName,
     listener: RuntimeEventListener<TName>
   ): () => void {
     const existing = this.listeners.get(name) ?? new Set();
+    if (existing.size >= this.maxListeners) {
+      console.warn(
+        `[RuntimeEventBus] Warning: Event "${name}" reached maximum listener limit (${this.maxListeners}).`
+      );
+    }
     existing.add(listener as RuntimeEventListener<RuntimeEventName>);
     this.listeners.set(name, existing);
 
     return () => {
-      existing.delete(listener as RuntimeEventListener<RuntimeEventName>);
+      this.off(name, listener);
     };
+  }
+
+  public listenerCount(name: RuntimeEventName): number {
+    return this.listeners.get(name)?.size ?? 0;
   }
 
   public emit<TName extends RuntimeEventName>(
     event: RuntimeEvent<TName>
   ): void {
-    const listeners = this.listeners.get(event.name);
+    const listenerSet = this.listeners.get(event.name);
+    if (!listenerSet || listenerSet.size === 0) {
+      return;
+    }
 
-    listeners?.forEach((listener) => {
+    const snapshot = Array.from(listenerSet);
+
+    for (const listener of snapshot) {
       try {
         listener(event);
       } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : String(err);
-        const errorListeners = this.listeners.get("runtime.internal.error");
-        errorListeners?.forEach((errorListener) => {
+        const errorMsg = err instanceof Error ? err.message : String(err);
+
+        if (event.name !== "runtime.internal.error" && !this.isEmittingInternalError) {
           try {
-            errorListener({
+            this.isEmittingInternalError = true;
+            this.emit({
               name: "runtime.internal.error",
               payload: {
                 eventName: event.name,
-                errorMessage,
-              },
+                error: errorMsg,
+                occurredAt: new Date().toISOString()
+              }
             });
-          } catch {
-            // Swallow errors in error listeners to prevent infinite loops
+          } finally {
+            this.isEmittingInternalError = false;
           }
-        });
+        }
       }
-    });
+    }
+  }
+
+  public listenerCount(name: RuntimeEventName): number {
+    return this.listeners.get(name)?.size ?? 0;
   }
 }
