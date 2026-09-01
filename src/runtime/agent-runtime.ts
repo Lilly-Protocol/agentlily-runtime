@@ -43,7 +43,26 @@ export class AgentRuntime {
     });
   }
 
+  public async stop(): Promise<void> {
+    if (!this.started) {
+      return;
+    }
+
+    this.started = false;
+    this.dependencies.logger.info("Runtime stopped.", {
+      runtimeId: this.runtimeId
+    });
+    this.dependencies.eventBus.emit({
+      name: "runtime.stopped",
+      payload: {
+        runtimeId: this.runtimeId,
+        occurredAt: new Date().toISOString()
+      }
+    });
+  }
+
   public async executeTask<TPayload, TResult>(
+
     task: RuntimeTask<TPayload>
   ): Promise<TaskExecutionResult<TResult>> {
     assertRuntimeStarted(this.started);
