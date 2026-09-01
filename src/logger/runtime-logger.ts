@@ -15,20 +15,34 @@ export interface ConsoleRuntimeLoggerOptions {
   level?: LogLevel;
 }
 
+export type RuntimeLogLevel = "info" | "warn" | "error";
+
+export interface ConsoleRuntimeLoggerOptions {
+  level?: RuntimeLogLevel;
+}
+
+const levelPriority: Record<RuntimeLogLevel, number> = {
+  info: 0,
+  warn: 1,
+  error: 2
+};
+
 export class ConsoleRuntimeLogger implements RuntimeLogger {
-  private readonly minLevel: LogLevel;
+  private readonly minimumLevel: RuntimeLogLevel;
 
-  constructor(options?: ConsoleRuntimeLoggerOptions) {
-    this.minLevel = options?.level ?? "info";
-  }
-
-  private shouldLog(level: LogLevel): boolean {
-    return LOG_LEVEL_PRIORITY[level] >= LOG_LEVEL_PRIORITY[this.minLevel];
+  public constructor(options: ConsoleRuntimeLoggerOptions = {}) {
+    this.minimumLevel = options.level ?? "info";
   }
 
   public info(message: string, metadata?: Record<string, unknown>): void {
-    if (!this.shouldLog("info")) return;
-    console.info(message, metadata ?? {});
+    if (this.shouldLog("info")) {
+      console.info(message, metadata ?? {});
+    }
+  }
+
+  public warn(message: string, metadata?: Record<string, unknown>): void {
+    if (!this.shouldLog("warn")) return;
+    console.warn(message, metadata ?? {});
   }
 
   public warn(message: string, metadata?: Record<string, unknown>): void {
@@ -37,9 +51,18 @@ export class ConsoleRuntimeLogger implements RuntimeLogger {
   }
 
   public error(message: string, metadata?: Record<string, unknown>): void {
-    if (!this.shouldLog("error")) return;
-    console.error(message, metadata ?? {});
+    if (this.shouldLog("error")) {
+      console.error(message, metadata ?? {});
+    }
   }
+
+  private shouldLog(level: "info" | "error"): boolean {
+    return levelPriority[level] >= levelPriority[this.minimumLevel];
+  }
+}
+
+export interface InMemoryRuntimeLoggerOptions {
+  maxEntries?: number;
 }
 
 export class InMemoryRuntimeLogger implements RuntimeLogger {
@@ -48,12 +71,36 @@ export class InMemoryRuntimeLogger implements RuntimeLogger {
     message: string;
     metadata: Record<string, unknown> | undefined;
   }> = [];
+  private readonly maxEntries: number;
+
+  public constructor(options: InMemoryRuntimeLoggerOptions = {}) {
+    this.maxEntries = options.maxEntries ?? 5_000;
+  }
 
   public info(message: string, metadata?: Record<string, unknown>): void {
-    this.entries.push({ level: "info", message, metadata });
+    this.appendEntry("info", message, metadata);
   }
 
   public error(message: string, metadata?: Record<string, unknown>): void {
-    this.entries.push({ level: "error", message, metadata });
+    this.appendEntry("error", message, metadata);
+  }
+
+  public clear(): void {
+    this.entries.length = 0;
+  }
+
+  public size(): number {
+    return this.entries.length;
+  }
+
+  private appendEntry(
+    level: "info" | "error",
+    message: string,
+    metadata?: Record<string, unknown>
+  ): void {
+    if (this.maxEntries > 0 && this.entries.length >= this.maxEntries) {
+      this.entries.shift();
+    }
+    this.entries.push({ level, message, metadata });
   }
 }

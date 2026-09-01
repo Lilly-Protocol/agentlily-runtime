@@ -20,3 +20,16 @@ export function assertNonEmptyValue(
     });
   }
 }
+
+export function assertMaxToolCalls(
+  currentToolCalls: number,
+  maxToolCalls: number
+): void {
+  if (maxToolCalls >= 0 && currentToolCalls >= maxToolCalls) {
+    throw new RuntimeError(
+      "MAX_TOOL_CALLS_EXCEEDED",
+      `Task exceeded maximum allowed tool calls limit of ${maxToolCalls}.`,
+      { currentToolCalls, maxToolCalls }
+    );
+  }
+}
