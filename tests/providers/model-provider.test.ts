@@ -1,42 +1,36 @@
-import { describe, expect, it } from "vitest";
-import {
-  type ModelProvider,
-  UnconfiguredModelProvider
-} from "../../src/providers/model-provider.js";
-
-const placeholderResponse = {
-  outputText:
-    "No model provider is configured. Contributors can implement one behind the ModelProvider interface."
-};
+import { describe, it, expect } from "vitest";
+import { UnconfiguredModelProvider } from "../../src/providers/model-provider.js";
 
 describe("UnconfiguredModelProvider", () => {
-  it("identifies itself as unconfigured", () => {
-    const provider = new UnconfiguredModelProvider();
+  const provider = new UnconfiguredModelProvider();
 
+  it("has name set to 'unconfigured'", () => {
     expect(provider.name).toBe("unconfigured");
   });
 
-  it("returns the stable placeholder response", async () => {
-    const provider: ModelProvider = new UnconfiguredModelProvider();
+  it("returns stable outputText regardless of prompt input", async () => {
+    const response = await provider.generate({
+      instructions: "ignored-instructions",
+      input: "ignored-input",
+    });
 
-    await expect(
-      provider.generate({ instructions: "Be helpful", input: "Hello" })
-    ).resolves.toEqual(placeholderResponse);
+    expect(response.outputText).toBe(
+      "No model provider is configured. Contributors can implement one behind the ModelProvider interface."
+    );
   });
 
-  it("ignores prompt arguments", async () => {
-    const provider: ModelProvider = new UnconfiguredModelProvider();
+  it("returns same response shape for empty prompt", async () => {
+    const response = await provider.generate({ instructions: "", input: "" });
 
-    const firstResponse = await provider.generate({
-      instructions: "Summarize the input",
-      input: "First prompt"
-    });
-    const secondResponse = await provider.generate({
-      instructions: "Translate the input",
-      input: "Completely different prompt"
-    });
+    expect(response).toHaveProperty("outputText");
+    expect(typeof response.outputText).toBe("string");
+    expect(response.outputText.length).toBeGreaterThan(0);
+  });
 
-    expect(firstResponse).toEqual(placeholderResponse);
-    expect(secondResponse).toEqual(firstResponse);
+  it("ignores prompt arguments completely", async () => {
+    const r1 = await provider.generate({ instructions: "a", input: "b" });
+    const r2 = await provider.generate({ instructions: "completely-different", input: "also-different" });
+
+    expect(r1.outputText).toBe(r2.outputText);
   });
 });
