@@ -5,7 +5,20 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       reporter: ["text", "html"],
-      include: ["src/**/*.ts"]
-    }
-  }
+      include: ["src/**/*.ts"],
+      exclude: [
+        "src/**/types.ts",
+        "src/runtime/context.ts",
+        "src/tasks/task-types.ts",
+        "src/providers/model-provider.ts",
+        "src/state/runtime-state.ts",
+      ],
+      thresholds: {
+        lines: 85,
+        functions: 75,
+        branches: 70,
+        statements: 85,
+      },
+    },
+  },
 });
