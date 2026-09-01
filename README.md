@@ -38,7 +38,7 @@ are expected to become contributor work:
 
 - Wallet-aware and payment-aware actions
 - Persistent memory and state backends
-- Model provider integrations
+- Model provider integrations (an `OpenAICompatibleModelProvider` scaffold is available for experimentation; note that it is scaffolded and intentionally not production-complete)
 - Runtime policy engines and approval flows
 - Long-running orchestration and scheduling
 - Distributed execution and durable coordination
