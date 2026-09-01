@@ -8,6 +8,7 @@ export interface RuntimeOptions {
   runtimeId: string;
   maxToolCallsPerTask?: number;
   memoryStore?: MemoryStore;
+  memoryStoragePath?: string | undefined;
   modelProvider?: ModelProvider;
   logger?: RuntimeLogger;
   stateStore?: RuntimeStateStore;

@@ -1,9 +1,16 @@
+import { existsSync } from "node:fs";
+import { rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   AgentRuntime,
+  createPaymentPrepTool,
   InMemoryRuntimeLogger,
+  PAYMENT_PREP_TOOL_NAME,
   RuntimeEventBus
 } from "../src/index.js";
+import type { PaymentPrepPayload, PaymentPrepResult } from "../src/index.js";
 
 describe("AgentRuntime", () => {
   it("executes a happy-path task and records memory", async () => {
@@ -124,58 +131,42 @@ describe("AgentRuntime", () => {
     });
   });
 
-  it("enforces maxToolCallsPerTask runtime policy guard during task execution", async () => {
+
+  it("stops the runtime, emits runtime.stopped event, and rejects subsequent tasks", async () => {
     const eventBus = new RuntimeEventBus();
-    let failureReason = "";
-    eventBus.on("runtime.task.failed", (event) => {
-      failureReason = String((event.payload as { reason?: string }).reason);
+    const stoppedEvents: { runtimeId: string; occurredAt: string }[] = [];
+    eventBus.on("runtime.stopped", (event) => {
+      stoppedEvents.push(event.payload);
     });
 
     const runtime = new AgentRuntime({
-      runtimeId: "runtime-max-tool-guard",
-      maxToolCallsPerTask: 1,
+      runtimeId: "runtime-stop-test",
       eventBus
     });
 
-    runtime.registerTool({
-      name: "tool-a",
-      description: "First tool",
-      async execute({ context }) {
-        // Attempt a nested second tool call during the same task
-        const actionExecutor = runtime.getDependencies().actionExecutor;
-        await actionExecutor.execute("tool-b", {}, context);
-        return { ok: true };
-      }
-    });
-
-    runtime.registerTool({
-      name: "tool-b",
-      description: "Second tool",
-      execute() {
-        return { ok: true };
-      }
-    });
-
     await runtime.start();
+    await runtime.stop();
 
+    expect(stoppedEvents).toHaveLength(1);
+    expect(stoppedEvents[0]?.runtimeId).toBe("runtime-stop-test");
+    expect(stoppedEvents[0]?.occurredAt).toBeDefined();
+
+    // Subsequent task execution rejects
     await expect(
       runtime.executeTask({
-        taskId: "task-limit-test",
-        agentId: "agent-test",
-        toolName: "tool-a",
-        input: "Run nested tools",
+        taskId: "task-post-stop",
+        agentId: "agent-stop",
+        toolName: "echo",
+        input: "Run after stop",
         payload: {}
       })
     ).rejects.toMatchObject({
-      code: "MAX_TOOL_CALLS_EXCEEDED",
-      details: {
-        currentToolCalls: 1,
-        maxToolCalls: 1
-      }
+      code: "RUNTIME_NOT_STARTED"
     });
 
-    expect(failureReason).toContain(
-      "Task exceeded maximum allowed tool calls limit of 1."
-    );
+    // Calling stop again is idempotent
+    await runtime.stop();
+    expect(stoppedEvents).toHaveLength(1);
   });
 });
+

@@ -21,4 +21,21 @@ export class RuntimeError extends Error {
     this.code = code;
     this.details = details;
   }
+
+  public toJSON(): {
+    name: string;
+    code: RuntimeErrorCode;
+    message: string;
+    details: Record<string, unknown> | undefined;
+    stack: string | undefined;
+  } {
+    return {
+      name: this.name,
+      code: this.code,
+      message: this.message,
+      details: this.details,
+      stack: this.stack
+    };
+  }
 }
+
