@@ -30,7 +30,23 @@ export class ToolRegistry {
     return tool;
   }
 
+  public has(toolName: string): boolean {
+    return this.tools.has(toolName);
+  }
+
+  public unregister(toolName: string): boolean {
+    return this.tools.delete(toolName);
+  }
+
+  public clear(): void {
+    this.tools.clear();
+  }
+
+  public size(): number {
+    return this.tools.size;
+  }
+
   public list(): ToolDefinition[] {
-    return [...this.tools.values()];
+    return Array.from(this.tools.values());
   }
 }
