@@ -13,6 +13,5 @@ export interface TaskExecutionResult<TResult = unknown> {
   output: TResult;
   startedAt: string;
   completedAt: string;
-  /** Duration of task execution in milliseconds. Always >= 0. */
   durationMs: number;
 }

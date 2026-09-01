@@ -6,10 +6,16 @@ import type { RuntimeContext } from "../runtime/context.js";
 import type { RuntimeTask, TaskExecutionResult } from "./task-types.js";
 
 export class TaskRunner {
+  private readonly actionExecutor: ActionExecutor;
+  private readonly memoryStore: MemoryStore;
+
   public constructor(
-    private readonly actionExecutor: ActionExecutor,
-    private readonly memoryStore: MemoryStore
-  ) {}
+    actionExecutor: ActionExecutor,
+    memoryStore: MemoryStore
+  ) {
+    this.actionExecutor = actionExecutor;
+    this.memoryStore = memoryStore;
+  }
 
   public async run<TPayload, TResult>(
     task: RuntimeTask<TPayload>,
@@ -20,7 +26,8 @@ export class TaskRunner {
     assertNonEmptyValue(task.toolName, "toolName");
     assertNonEmptyValue(task.input, "input");
 
-    const startedAt = new Date();
+    const startTime = performance.now();
+    const startedAt = new Date().toISOString();
 
     try {
       const output = await this.actionExecutor.execute<TPayload, TResult>(
@@ -29,8 +36,9 @@ export class TaskRunner {
         context
       );
 
-      const completedAt = new Date();
-      const durationMs = Math.max(0, completedAt.getTime() - startedAt.getTime());
+      const endTime = performance.now();
+      const completedAt = new Date().toISOString();
+      const durationMs = Math.max(0, Math.round(endTime - startTime));
 
       await this.memoryStore.append({
         agentId: task.agentId,
@@ -45,8 +53,8 @@ export class TaskRunner {
         agentId: task.agentId,
         toolName: task.toolName,
         output,
-        startedAt: startedAt.toISOString(),
-        completedAt: completedAt.toISOString(),
+        startedAt,
+        completedAt,
         durationMs
       };
     } catch (error) {
