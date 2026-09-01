@@ -1,89 +1,78 @@
-import { describe, it, expect } from 'vitest';
-import { RuntimeEventBus } from '../../src/events/runtime-events.js';
+import { describe, expect, it, vi } from "vitest";
+import { RuntimeEventBus } from "../../src/events/runtime-events";
 
-describe('RuntimeEventBus subscribe/unsubscribe semantics', () => {
-  it('delivers events to a listener registered for the correct name', () => {
+describe("RuntimeEventBus", () => {
+  it("delivers events to registered listeners for that event name", () => {
     const bus = new RuntimeEventBus();
-    const received: string[] = [];
+    const startedListener = vi.fn();
+    const failedListener = vi.fn();
 
-    bus.on('runtime.started', (e) => received.push(e.name));
+    bus.on("runtime.started", startedListener);
+    bus.on("runtime.task.failed", failedListener);
 
     bus.emit({
-      name: 'runtime.started',
-      payload: { runtimeId: 'rt-1', occurredAt: new Date().toISOString() }
+      name: "runtime.started",
+      payload: { runtimeId: "rt-1", occurredAt: "2026-09-01T00:00:00Z" },
     });
 
-    expect(received).toEqual(['runtime.started']);
+    expect(startedListener).toHaveBeenCalledTimes(1);
+    expect(startedListener).toHaveBeenCalledWith({
+      name: "runtime.started",
+      payload: { runtimeId: "rt-1", occurredAt: "2026-09-01T00:00:00Z" },
+    });
+    expect(failedListener).not.toHaveBeenCalled();
   });
 
-  it('stops delivery after unsubscribe', () => {
+  it("stops delivery after unsubscribe function is called", () => {
     const bus = new RuntimeEventBus();
-    const received: string[] = [];
+    const listener = vi.fn();
 
-    const unsub = bus.on('runtime.started', (e) => received.push(e.name));
-
-    bus.emit({
-      name: 'runtime.started',
-      payload: { runtimeId: 'rt-2', occurredAt: new Date().toISOString() }
-    });
-
-    unsub();
+    const unsubscribe = bus.on("runtime.task.completed", listener);
 
     bus.emit({
-      name: 'runtime.started',
-      payload: { runtimeId: 'rt-2b', occurredAt: new Date().toISOString() }
+      name: "runtime.task.completed",
+      payload: {
+        runtimeId: "rt-1",
+        taskId: "t-1",
+        agentId: "a-1",
+        toolName: "calc",
+      },
     });
 
-    expect(received).toEqual(['runtime.started']);
+    expect(listener).toHaveBeenCalledTimes(1);
+
+    unsubscribe();
+
+    bus.emit({
+      name: "runtime.task.completed",
+      payload: {
+        runtimeId: "rt-1",
+        taskId: "t-2",
+        agentId: "a-1",
+        toolName: "calc",
+      },
+    });
+
+    expect(listener).toHaveBeenCalledTimes(1);
   });
 
-  it('does not invoke listeners registered for other event names', () => {
+  it("handles duplicate listeners and maintains event isolation across different event names", () => {
     const bus = new RuntimeEventBus();
-    const startedReceived: string[] = [];
-    const completedReceived: string[] = [];
+    const l1 = vi.fn();
+    const l2 = vi.fn();
+    const otherListener = vi.fn();
 
-    bus.on('runtime.started', (e) => startedReceived.push(e.name));
-    bus.on('runtime.task.completed', (e) => completedReceived.push(e.name));
+    bus.on("runtime.task.received", l1);
+    bus.on("runtime.task.received", l2);
+    bus.on("runtime.task.failed", otherListener);
 
     bus.emit({
-      name: 'runtime.started',
-      payload: { runtimeId: 'rt-4', occurredAt: new Date().toISOString() }
+      name: "runtime.task.received",
+      payload: { runtimeId: "rt-1", taskId: "t-1", agentId: "a-1" },
     });
 
-    expect(startedReceived).toEqual(['runtime.started']);
-    expect(completedReceived).toEqual([]);
-  });
-
-  it('unsubscribe removes the listener and subsequent emits do not deliver', () => {
-    const bus = new RuntimeEventBus();
-    const received: string[] = [];
-    const handler = (e: any) => received.push(e.name);
-
-    const unsub = bus.on('runtime.started', handler);
-    unsub();
-
-    bus.emit({
-      name: 'runtime.started',
-      payload: { runtimeId: 'rt-5', occurredAt: new Date().toISOString() }
-    });
-
-    expect(received).toEqual([]);
-  });
-
-  it('multiple distinct listeners on the same event all receive delivery', () => {
-    const bus = new RuntimeEventBus();
-    const receivedA: string[] = [];
-    const receivedB: string[] = [];
-
-    bus.on('runtime.started', (e) => receivedA.push(e.name));
-    bus.on('runtime.started', (e) => receivedB.push(e.name));
-
-    bus.emit({
-      name: 'runtime.started',
-      payload: { runtimeId: 'rt-6', occurredAt: new Date().toISOString() }
-    });
-
-    expect(receivedA).toEqual(['runtime.started']);
-    expect(receivedB).toEqual(['runtime.started']);
+    expect(l1).toHaveBeenCalledTimes(1);
+    expect(l2).toHaveBeenCalledTimes(1);
+    expect(otherListener).not.toHaveBeenCalled();
   });
 });
