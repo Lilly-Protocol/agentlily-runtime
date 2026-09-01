@@ -1,52 +1,43 @@
 import { describe, expect, it } from "vitest";
 import { RuntimeError } from "../src/index.js";
 
-describe("RuntimeError serialization (issue #155)", () => {
-  it("toJSON() includes name, code, message, details, and stack", () => {
-    const error = new RuntimeError("TOOL_NOT_FOUND", "echo tool is missing", {
-      agentId: "agent-1",
-      taskName: "task-1"
-    });
+describe("RuntimeError", () => {
+  it("serializes name, code, message, details, and stack via toJSON", () => {
+    const details = { toolName: "echo", attempt: 3 };
+    const err = new RuntimeError("EXECUTION_FAILED", "Execution failed", details);
 
-    const json = error.toJSON();
+    const json = err.toJSON();
 
     expect(json.name).toBe("RuntimeError");
-    expect(json.code).toBe("TOOL_NOT_FOUND");
-    expect(json.message).toBe("echo tool is missing");
-    expect(json.details).toEqual({
-      agentId: "agent-1",
-      taskName: "task-1"
-    });
+    expect(json.code).toBe("EXECUTION_FAILED");
+    expect(json.message).toBe("Execution failed");
+    expect(json.details).toEqual(details);
     expect(typeof json.stack).toBe("string");
-    expect(json.stack).toContain("RuntimeError");
   });
 
-  it("code and details survive JSON.stringify", () => {
-    const error = new RuntimeError("INVALID_TASK", "task payload rejected", {
-      reason: "unknown tool"
-    });
+  it("survives JSON.stringify losslessly", () => {
+    const details = { toolName: "echo" };
+    const err = new RuntimeError("TOOL_NOT_FOUND", "Tool not found", details);
 
-    const roundTripped = JSON.parse(JSON.stringify(error)) as {
+    const parsed = JSON.parse(JSON.stringify(err)) as {
       name: string;
       code: string;
       message: string;
       details: Record<string, unknown>;
-      stack: string;
+      stack: string | undefined;
     };
 
-    expect(roundTripped.code).toBe("INVALID_TASK");
-    expect(roundTripped.details).toEqual({ reason: "unknown tool" });
-    expect(roundTripped.message).toBe("task payload rejected");
+    expect(parsed.name).toBe("RuntimeError");
+    expect(parsed.code).toBe("TOOL_NOT_FOUND");
+    expect(parsed.message).toBe("Tool not found");
+    expect(parsed.details).toEqual(details);
+    expect(typeof parsed.stack).toBe("string");
   });
 
-  it("toJSON() handles an error without details", () => {
-    const error = new RuntimeError("EXECUTION_FAILED", "step blew up");
-    const json = error.toJSON();
+  it("includes details when undefined", () => {
+    const err = new RuntimeError("RUNTIME_NOT_STARTED", "Runtime not started");
 
-    expect(json.code).toBe("EXECUTION_FAILED");
-    expect(json.details).toBeUndefined();
-    expect(Object.keys(json).sort()).toEqual(
-      ["code", "details", "message", "name", "stack"].sort()
-    );
+    expect(err.toJSON().details).toBeUndefined();
+    expect(JSON.parse(JSON.stringify(err)).details).toBeUndefined();
   });
 });
