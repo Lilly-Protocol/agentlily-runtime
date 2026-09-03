@@ -96,6 +96,8 @@ export class ConsoleRuntimeLogger implements RuntimeLogger {
 
 export interface InMemoryRuntimeLoggerOptions {
   maxEntries?: number;
+  /** Minimum metadata key pattern to redact before entries are stored. */
+  redactKeys?: RegExp;
 }
 
 interface InMemoryLogEntry {
@@ -107,9 +109,11 @@ interface InMemoryLogEntry {
 export class InMemoryRuntimeLogger implements RuntimeLogger {
   public readonly entries: InMemoryLogEntry[] = [];
   private readonly maxEntries: number;
+  private readonly redactKeys: RegExp;
 
   public constructor(options: InMemoryRuntimeLoggerOptions = {}) {
     this.maxEntries = options.maxEntries ?? 5_000;
+    this.redactKeys = options.redactKeys ?? DEFAULT_REDACT_KEYS;
   }
 
   public info(message: string, metadata?: Record<string, unknown>): void {
@@ -144,6 +148,13 @@ export class InMemoryRuntimeLogger implements RuntimeLogger {
     if (this.maxEntries > 0 && this.entries.length >= this.maxEntries) {
       this.entries.shift();
     }
-    this.entries.push({ level, message, metadata });
+    this.entries.push({
+      level,
+      message,
+      metadata:
+        metadata === undefined
+          ? undefined
+          : (redactValue(metadata, this.redactKeys) as Record<string, unknown>)
+    });
   }
 }
