@@ -9,7 +9,10 @@ export {
   AgentInstanceManager,
   type AgentInstanceManagerOptions
 } from "./agents/agent-instance-manager.js";
-export { ActionExecutor } from "./actions/action-executor.js";
+export {
+  ActionExecutor,
+  type ActionExecutorOptions
+} from "./actions/action-executor.js";
 export { RuntimeError } from "./errors/runtime-errors.js";
 export { RuntimeEventBus } from "./events/runtime-events.js";
 export {
