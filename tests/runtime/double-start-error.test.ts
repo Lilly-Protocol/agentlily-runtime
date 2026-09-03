@@ -17,6 +17,24 @@ describe("AgentRuntime double-start rejection", () => {
     }
   });
 
+  it("throws RUNTIME_ALREADY_STOPPED when restarted after stop", async () => {
+    const runtime = new AgentRuntime({ runtimeId: "restart-after-stop-test" });
+    await runtime.start();
+    await runtime.stop();
+
+    try {
+      await runtime.start();
+      expect.fail("should have thrown");
+    } catch (e) {
+      expect(e).toBeInstanceOf(RuntimeError);
+      const err = e as RuntimeError;
+      expect(err.code).toBe("RUNTIME_ALREADY_STOPPED");
+      expect(err.message).toContain(
+        "already been stopped and cannot be restarted"
+      );
+    }
+  });
+
   it("does not emit runtime.started event twice", async () => {
     const { RuntimeEventBus } =
       await import("../../src/events/runtime-events.js");
