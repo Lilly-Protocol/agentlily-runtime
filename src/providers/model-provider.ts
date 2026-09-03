@@ -1,3 +1,5 @@
+import type { RuntimeLogger } from "../logger/runtime-logger.js";
+
 export interface ModelPrompt {
   instructions: string;
   input: string;
@@ -15,13 +17,23 @@ export interface ModelProvider {
 
 export class UnconfiguredModelProvider implements ModelProvider {
   public readonly name = "unconfigured";
+  private readonly logger: RuntimeLogger | undefined;
+
+  public constructor(logger?: RuntimeLogger | undefined) {
+    this.logger = logger;
+  }
 
   public async generate(prompt: ModelPrompt): Promise<ModelResponse> {
-    console.warn(
+    const warningMessage =
       "UnconfiguredModelProvider: no model provider is configured. " +
-        "generate() was called but will return placeholder text. " +
-        "Configure a real ModelProvider to enable AI-powered task execution."
-    );
+      "generate() was called but will return placeholder text. " +
+      "Configure a real ModelProvider to enable AI-powered task execution.";
+
+    if (this.logger) {
+      this.logger.warn(warningMessage);
+    } else {
+      console.warn(warningMessage);
+    }
 
     return {
       outputText:
