@@ -7,6 +7,7 @@ import type { ToolDefinition } from "../tools/types.js";
 
 export interface RuntimeOptions {
   runtimeId: string;
+  maxAgentInstances?: number;
   maxToolCallsPerTask?: number;
   memoryStore?: MemoryStore;
   memoryStoragePath?: string | undefined;
