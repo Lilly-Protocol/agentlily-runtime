@@ -91,17 +91,18 @@ export class OpenAICompatibleModelProvider implements ModelProvider {
       throw new Error(`OpenAI-compatible provider request failed: ${message}`);
     }
 
+    const rawBody = await response.text().catch(() => "");
+
     if (!response.ok) {
-      const errorText = await response.text().catch(() => "");
       throw new Error(
-        `OpenAI-compatible provider returned HTTP ${response.status}: ${errorText}`
+        `OpenAI-compatible provider returned HTTP ${response.status}: ${rawBody}`
       );
     }
 
-    const data = (await response.json()) as {
+    let data: {
       choices?: Array<{
         message?: {
-          content?: string;
+          content?: string | null;
         };
         finish_reason?: string;
       }>;
@@ -109,13 +110,48 @@ export class OpenAICompatibleModelProvider implements ModelProvider {
       model?: string;
     };
 
-    const outputText = data.choices?.[0]?.message?.content ?? "";
+    try {
+      data = JSON.parse(rawBody);
+    } catch {
+      const bodyExcerpt = rawBody.length > 200 ? `${rawBody.slice(0, 200)}...` : rawBody;
+      throw new Error(
+        `OpenAI-compatible provider returned invalid JSON (HTTP ${response.status}): ${bodyExcerpt}`
+      );
+    }
+
+    if (!data || typeof data !== "object") {
+      throw new Error(
+        `OpenAI-compatible provider returned malformed response object (HTTP ${response.status}).`
+      );
+    }
+
+    if (!Array.isArray(data.choices) || data.choices.length === 0) {
+      throw new Error(
+        `OpenAI-compatible provider response missing non-empty "choices" array.`
+      );
+    }
+
+    const firstChoice = data.choices[0];
+    if (!firstChoice || typeof firstChoice !== "object") {
+      throw new Error(
+        `OpenAI-compatible provider response contains malformed choice entry.`
+      );
+    }
+
+    const messageContent = firstChoice.message?.content;
+    if (typeof messageContent !== "string") {
+      throw new Error(
+        `OpenAI-compatible provider choice missing string message content.`
+      );
+    }
+
+    const outputText = messageContent;
     const metadata: Record<string, unknown> = {
       model: data.model ?? this.model
     };
 
-    if (data.choices?.[0]?.finish_reason !== undefined) {
-      metadata.finishReason = data.choices[0].finish_reason;
+    if (firstChoice.finish_reason !== undefined) {
+      metadata.finishReason = firstChoice.finish_reason;
     }
     if (data.usage !== undefined) {
       metadata.usage = data.usage;
