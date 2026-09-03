@@ -16,6 +16,7 @@ export class AgentRuntime {
   private readonly dependencies: ReturnType<typeof createRuntimeDependencies>;
   private readonly runtimeId: string;
   private readonly inFlightTasks = new Set<string>();
+  private readonly inFlightPromises = new Map<string, Promise<unknown>>();
   private started = false;
   private stopped = false;
 
@@ -135,66 +136,74 @@ export class AgentRuntime {
       toolName: task.toolName
     });
 
-    this.inFlightTasks.add(task.taskId);
-    try {
-      const result = await this.dependencies.taskRunner.run<TPayload, TResult>(
-        task,
-        context
-      );
+    const taskPromise = (async () => {
+      try {
+        const result = await this.dependencies.taskRunner.run<
+          TPayload,
+          TResult
+        >(task, context);
 
-      this.dependencies.logger.info("Runtime task completed.", {
-        runtimeId: this.runtimeId,
-        taskId: task.taskId,
-        toolName: task.toolName,
-        durationMs: result.durationMs
-      });
-
-      this.dependencies.eventBus.emit({
-        name: "runtime.task.completed",
-        payload: {
+        this.dependencies.logger.info("Runtime task completed.", {
           runtimeId: this.runtimeId,
           taskId: task.taskId,
-          agentId: task.agentId,
           toolName: task.toolName,
           durationMs: result.durationMs
-        }
-      });
+        });
 
-      return result;
-    } catch (error) {
-      const reason =
-        error instanceof Error ? error.message : "Unknown runtime failure.";
+        this.dependencies.eventBus.emit({
+          name: "runtime.task.completed",
+          payload: {
+            runtimeId: this.runtimeId,
+            taskId: task.taskId,
+            agentId: task.agentId,
+            toolName: task.toolName,
+            durationMs: result.durationMs
+          }
+        });
 
-      this.dependencies.logger.error("Runtime task failed.", {
-        runtimeId: this.runtimeId,
-        taskId: task.taskId,
-        reason
-      });
-      this.dependencies.eventBus.emit({
-        name: "runtime.task.failed",
-        payload: {
+        return result;
+      } catch (error) {
+        const reason =
+          error instanceof Error ? error.message : "Unknown runtime failure.";
+
+        this.dependencies.logger.error("Runtime task failed.", {
           runtimeId: this.runtimeId,
           taskId: task.taskId,
-          agentId: task.agentId,
           reason
-        }
-      });
+        });
+        this.dependencies.eventBus.emit({
+          name: "runtime.task.failed",
+          payload: {
+            runtimeId: this.runtimeId,
+            taskId: task.taskId,
+            agentId: task.agentId,
+            reason
+          }
+        });
 
-      throw error;
-    } finally {
-      this.inFlightTasks.delete(task.taskId);
-    }
+        throw error;
+      } finally {
+        this.inFlightTasks.delete(task.taskId);
+        this.inFlightPromises.delete(task.taskId);
+      }
+    })();
+
+    this.inFlightTasks.add(task.taskId);
+    this.inFlightPromises.set(task.taskId, taskPromise);
+
+    return await taskPromise;
   }
 
   private async drainInFlightTasks(timeoutMs: number): Promise<void> {
-    const deadline = Date.now() + timeoutMs;
-    while (this.inFlightTasks.size > 0) {
-      const remaining = deadline - Date.now();
-      if (remaining <= 0) {
-        break;
-      }
-      await this.sleep(Math.min(5, remaining));
+    if (this.inFlightPromises.size === 0) {
+      return;
     }
+    const allPromises = Array.from(this.inFlightPromises.values());
+    const drainPromise = Promise.allSettled(allPromises);
+    if (timeoutMs <= 0) {
+      return;
+    }
+    await Promise.race([drainPromise, this.sleep(timeoutMs)]);
   }
 
   private sleep(milliseconds: number): Promise<void> {
