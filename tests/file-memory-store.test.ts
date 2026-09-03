@@ -92,4 +92,66 @@ describe("JsonFileMemoryStore", () => {
     const entries = await store.listByAgent("nonexistent-agent");
     expect(entries).toEqual([]);
   });
+
+  it("handles empty and whitespace-only files gracefully as empty history", async () => {
+    const { mkdir, writeFile } = await import("node:fs/promises");
+    const { dirname } = await import("node:path");
+    await mkdir(dirname(tempFilePath), { recursive: true });
+    await writeFile(tempFilePath, "   \n\t  ", "utf-8");
+
+    const store = new JsonFileMemoryStore(tempFilePath);
+    const entries = await store.listByAgent("agent-empty");
+    expect(entries).toEqual([]);
+
+    await store.append({
+      agentId: "agent-empty",
+      taskId: "task-new",
+      input: "input",
+      output: "ok",
+      recordedAt: new Date().toISOString()
+    });
+    const updated = await store.listByAgent("agent-empty");
+    expect(updated).toHaveLength(1);
+  });
+
+  it("throws RuntimeError with code STORAGE_CORRUPTION when JSON file is invalid/corrupt", async () => {
+    const { mkdir, writeFile } = await import("node:fs/promises");
+    const { dirname } = await import("node:path");
+    await mkdir(dirname(tempFilePath), { recursive: true });
+    await writeFile(tempFilePath, "{\"truncated\": true, invalid_json...", "utf-8");
+
+    const store = new JsonFileMemoryStore(tempFilePath);
+
+    await expect(store.listByAgent("any-agent")).rejects.toThrowError(
+      /Corrupted JsonFileMemoryStore file/
+    );
+
+    try {
+      await store.append({
+        agentId: "agent-1",
+        taskId: "task-1",
+        input: "in",
+        output: "out",
+        recordedAt: new Date().toISOString()
+      });
+      expect.unreachable("append should have failed on corrupted file");
+    } catch (err: any) {
+      expect(err.name).toBe("RuntimeError");
+      expect(err.code).toBe("STORAGE_CORRUPTION");
+      expect(err.details?.filePath).toBe(tempFilePath);
+    }
+  });
+
+  it("throws RuntimeError with code STORAGE_CORRUPTION when JSON root is not an array", async () => {
+    const { mkdir, writeFile } = await import("node:fs/promises");
+    const { dirname } = await import("node:path");
+    await mkdir(dirname(tempFilePath), { recursive: true });
+    await writeFile(tempFilePath, JSON.stringify({ notAnArray: true }), "utf-8");
+
+    const store = new JsonFileMemoryStore(tempFilePath);
+
+    await expect(store.listByAgent("any-agent")).rejects.toMatchObject({
+      code: "STORAGE_CORRUPTION"
+    });
+  });
 });

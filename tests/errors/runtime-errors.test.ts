@@ -37,10 +37,13 @@ describe("RuntimeError construction and code values (Issue #110)", () => {
     const codes = [
       "RUNTIME_NOT_STARTED",
       "RUNTIME_ALREADY_STARTED",
+      "RUNTIME_ALREADY_STOPPED",
       "TOOL_NOT_FOUND",
       "DUPLICATE_TOOL",
       "INVALID_TASK",
-      "EXECUTION_FAILED"
+      "EXECUTION_FAILED",
+      "MAX_TOOL_CALLS_EXCEEDED",
+      "STORAGE_CORRUPTION"
     ] as const;
 
     for (const code of codes) {
