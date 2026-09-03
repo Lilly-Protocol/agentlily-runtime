@@ -110,6 +110,9 @@ console.log(result.output);
 - `npm run test` runs Vitest with coverage
 - `npm run verify` runs formatting, linting, typecheck, and tests
 
+CI runs `npm run verify` on Node.js 20, the minimum supported by `engines`, and
+Node.js 24, the current active LTS line.
+
 ## Contributor Guidance
 
 Good first contributions should add depth without collapsing extension points.
