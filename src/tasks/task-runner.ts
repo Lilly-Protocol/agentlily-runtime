@@ -18,6 +18,8 @@ export class TaskRunner {
     task: RuntimeTask<TPayload>,
     context: RuntimeContext
   ): Promise<TaskExecutionResult<TResult>> {
+    // Task fields are validated in AgentRuntime.executeTask() before event emission;
+    // this check is preserved to guard direct TaskRunner callers.
     assertNonEmptyValue(task.taskId, "taskId");
     assertNonEmptyValue(task.agentId, "agentId");
     assertNonEmptyValue(task.toolName, "toolName");
