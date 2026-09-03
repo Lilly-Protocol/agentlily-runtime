@@ -98,24 +98,53 @@ export class OpenAICompatibleModelProvider implements ModelProvider {
       );
     }
 
-    const data = (await response.json()) as {
-      choices?: Array<{
-        message?: {
-          content?: string;
-        };
-        finish_reason?: string;
-      }>;
+    const responseBody = await response.text();
+    let parsed: unknown;
+
+    try {
+      parsed = JSON.parse(responseBody);
+    } catch {
+      throw new Error(
+        `OpenAI-compatible provider returned invalid JSON for HTTP ${response.status}: ${formatBodyExcerpt(responseBody)}`
+      );
+    }
+
+    if (typeof parsed !== "object" || parsed === null) {
+      throw new Error(
+        `OpenAI-compatible provider returned a malformed response for HTTP ${response.status}: expected a JSON object. Body: ${formatBodyExcerpt(responseBody)}`
+      );
+    }
+
+    const data = parsed as {
+      choices?: unknown;
       usage?: Record<string, unknown>;
       model?: string;
     };
 
-    const outputText = data.choices?.[0]?.message?.content ?? "";
+    if (!Array.isArray(data.choices) || data.choices.length === 0) {
+      throw new Error(
+        `OpenAI-compatible provider returned a malformed response for HTTP ${response.status}: expected choices to contain at least one entry. Body: ${formatBodyExcerpt(responseBody)}`
+      );
+    }
+
+    const firstChoice = data.choices[0] as {
+      message?: { content?: unknown };
+      finish_reason?: string;
+    } | null;
+    const outputText = firstChoice?.message?.content;
+
+    if (typeof outputText !== "string") {
+      throw new Error(
+        `OpenAI-compatible provider returned a malformed response for HTTP ${response.status}: expected choices[0].message.content to be a string. Body: ${formatBodyExcerpt(responseBody)}`
+      );
+    }
+
     const metadata: Record<string, unknown> = {
       model: data.model ?? this.model
     };
 
-    if (data.choices?.[0]?.finish_reason !== undefined) {
-      metadata.finishReason = data.choices[0].finish_reason;
+    if (firstChoice?.finish_reason !== undefined) {
+      metadata.finishReason = firstChoice.finish_reason;
     }
     if (data.usage !== undefined) {
       metadata.usage = data.usage;
@@ -126,4 +155,16 @@ export class OpenAICompatibleModelProvider implements ModelProvider {
       metadata
     };
   }
+}
+
+function formatBodyExcerpt(body: string): string {
+  const compact = body.replace(/\s+/g, " ").trim();
+  if (compact.length === 0) {
+    return "<empty body>";
+  }
+
+  const maxLength = 500;
+  return compact.length > maxLength
+    ? `${compact.slice(0, maxLength)}...`
+    : compact;
 }
