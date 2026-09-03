@@ -33,8 +33,12 @@ export function createRuntimeDependencies(options: RuntimeOptions) {
   const agentManager = new AgentInstanceManager();
   const actionExecutor = new ActionExecutor(
     toolRegistry,
-    options.maxToolCallsPerTask,
-    eventBus
+    {
+      maxToolCallsPerTask: options.maxToolCallsPerTask,
+      maxTrackedTasks: options.maxTrackedTasks,
+      logger,
+      eventBus
+    }
   );
   const taskRunner = new TaskRunner(actionExecutor, memoryStore);
 
