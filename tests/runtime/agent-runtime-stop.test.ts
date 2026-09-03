@@ -54,4 +54,81 @@ describe("AgentRuntime.stop", () => {
     );
     expect(stoppedEvents.length).toBe(1);
   });
+
+  it("returns promptly when in-flight tasks finish early rather than waiting for full drain timeout", async () => {
+    runtime.registerTool({
+      name: "quick-task",
+      description: "Quick task",
+      execute: async () => {
+        await new Promise((r) => setTimeout(r, 25));
+        return { done: true };
+      }
+    });
+
+    await runtime.start();
+
+    const taskPromise = runtime.executeTask({
+      taskId: "task-quick-1",
+      agentId: "agent-1",
+      toolName: "quick-task",
+      input: "run",
+      payload: {}
+    });
+
+    expect(runtime.getInFlightTaskCount()).toBe(1);
+
+    const stopStart = Date.now();
+    // Large drainTimeoutMs (1500ms), but task finishes in ~25ms
+    await runtime.stop({ drainTimeoutMs: 1500 });
+    const elapsed = Date.now() - stopStart;
+
+    // Must return promptly (well under the 1500ms timeout)
+    expect(elapsed).toBeLessThan(400);
+    expect(runtime.getInFlightTaskCount()).toBe(0);
+    await expect(taskPromise).resolves.toBeDefined();
+  });
+
+  it("leaves stop unblocked when tasks exceed drainTimeoutMs and preserves in-flight count", async () => {
+    let unblockTool!: () => void;
+    runtime.registerTool({
+      name: "slow-task",
+      description: "Slow task that exceeds drain timeout",
+      execute: async () => {
+        await new Promise<void>((r) => {
+          unblockTool = r;
+        });
+        return { done: true };
+      }
+    });
+
+    await runtime.start();
+
+    const taskPromise = runtime.executeTask({
+      taskId: "task-slow-1",
+      agentId: "agent-1",
+      toolName: "slow-task",
+      input: "run",
+      payload: {}
+    });
+
+    expect(runtime.getInFlightTaskCount()).toBe(1);
+
+    const stopStart = Date.now();
+    // Short drain timeout of 50ms
+    await runtime.stop({ drainTimeoutMs: 50 });
+    const elapsed = Date.now() - stopStart;
+
+    // stop() unblocks around 50ms without waiting indefinitely
+    expect(elapsed).toBeGreaterThanOrEqual(40);
+    expect(elapsed).toBeLessThan(350);
+
+    // Runtime is stopped, but task is still in flight (stranded)
+    expect(runtime.isRunning()).toBe(false);
+    expect(runtime.getInFlightTaskCount()).toBe(1);
+
+    // Clean up stranded task
+    unblockTool();
+    await taskPromise;
+    expect(runtime.getInFlightTaskCount()).toBe(0);
+  });
 });
