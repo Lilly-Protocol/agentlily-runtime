@@ -97,4 +97,47 @@ describe("ActionExecutor", () => {
     // task-B has its own quota and succeeds
     await expect(executor.execute("ping", {}, ctxB)).resolves.toBe("pong");
   });
+
+  it("does not consume task tool-call budget when tool resolution fails", async () => {
+    const registry = new ToolRegistry();
+    registry.register({
+      name: "valid-tool",
+      description: "A valid tool",
+      execute() {
+        return "valid-result";
+      }
+    });
+
+    const executor = new ActionExecutor(registry, 1);
+    const ctx = createMockContext("task-typo");
+
+    expect(executor.getToolCallCount("task-typo")).toBe(0);
+
+    // Call with an unregistered tool name throws TOOL_NOT_FOUND
+    await expect(
+      executor.execute("non-existent-tool", {}, ctx)
+    ).rejects.toMatchObject({
+      name: "RuntimeError",
+      code: "TOOL_NOT_FOUND",
+      details: {
+        toolName: "non-existent-tool"
+      }
+    });
+
+    // Budget remains intact (0 consumed)
+    expect(executor.getToolCallCount("task-typo")).toBe(0);
+
+    // Subsequent valid call with maxToolCallsPerTask: 1 succeeds
+    await expect(executor.execute("valid-tool", {}, ctx)).resolves.toBe(
+      "valid-result"
+    );
+    expect(executor.getToolCallCount("task-typo")).toBe(1);
+
+    // Second valid call now exceeds limit
+    await expect(
+      executor.execute("valid-tool", {}, ctx)
+    ).rejects.toMatchObject({
+      code: "MAX_TOOL_CALLS_EXCEEDED"
+    });
+  });
 });
