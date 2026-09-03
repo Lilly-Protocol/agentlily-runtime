@@ -1,5 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
-import { ConsoleRuntimeLogger } from "../../src/logger/runtime-logger.js";
+import {
+  ConsoleRuntimeLogger,
+  InMemoryRuntimeLogger
+} from "../../src/logger/runtime-logger.js";
 
 describe("ConsoleRuntimeLogger redaction", () => {
   it("redacts default sensitive keys (secret, token, password, apiKey, authorization)", () => {
@@ -108,5 +111,73 @@ describe("ConsoleRuntimeLogger redaction", () => {
     expect(loggedMeta.detail).toBe("oops");
 
     errorSpy.mockRestore();
+  });
+});
+
+describe("InMemoryRuntimeLogger redaction", () => {
+  it("redacts default sensitive keys across all log levels", () => {
+    const logger = new InMemoryRuntimeLogger();
+
+    logger.info("info test", {
+      userId: "u1",
+      apiKey: "sk-live-123",
+      password: "pass",
+      token: "tok-abc",
+      nested: { secret: "hidden-val", safe: "ok" }
+    });
+    logger.warn("warn test", {
+      authorization: "Bearer secret-token",
+      normal: 1
+    });
+    logger.debug("debug test", { secretKey: "key-123", mode: "verbose" });
+    logger.error("error test", { api_key: "api-secret", detail: "err" });
+
+    expect(logger.entries).toHaveLength(4);
+
+    expect(logger.entries[0]!.metadata).toEqual({
+      userId: "u1",
+      apiKey: "[REDACTED]",
+      password: "[REDACTED]",
+      token: "[REDACTED]",
+      nested: {
+        secret: "[REDACTED]",
+        safe: "ok"
+      }
+    });
+
+    expect(logger.entries[1]!.metadata).toEqual({
+      authorization: "[REDACTED]",
+      normal: 1
+    });
+
+    expect(logger.entries[2]!.metadata).toEqual({
+      secretKey: "[REDACTED]",
+      mode: "verbose"
+    });
+
+    expect(logger.entries[3]!.metadata).toEqual({
+      api_key: "[REDACTED]",
+      detail: "err"
+    });
+  });
+
+  it("accepts custom redactKeys option in InMemoryRuntimeLogger", () => {
+    const logger = new InMemoryRuntimeLogger({ redactKeys: /credit_card/i });
+
+    logger.info("custom redaction", {
+      credit_card: "1234-5678-9012-3456",
+      apiKey: "visible-key"
+    });
+
+    expect(logger.entries[0]!.metadata).toEqual({
+      credit_card: "[REDACTED]",
+      apiKey: "visible-key"
+    });
+  });
+
+  it("preserves undefined metadata when none is provided", () => {
+    const logger = new InMemoryRuntimeLogger();
+    logger.info("no metadata");
+    expect(logger.entries[0]!.metadata).toBeUndefined();
   });
 });
