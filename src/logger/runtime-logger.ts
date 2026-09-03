@@ -96,6 +96,7 @@ export class ConsoleRuntimeLogger implements RuntimeLogger {
 
 export interface InMemoryRuntimeLoggerOptions {
   maxEntries?: number;
+  level?: RuntimeLogLevel;
 }
 
 interface InMemoryLogEntry {
@@ -107,25 +108,39 @@ interface InMemoryLogEntry {
 export class InMemoryRuntimeLogger implements RuntimeLogger {
   public readonly entries: InMemoryLogEntry[] = [];
   private readonly maxEntries: number;
+  private readonly minimumLevel: RuntimeLogLevel;
 
   public constructor(options: InMemoryRuntimeLoggerOptions = {}) {
     this.maxEntries = options.maxEntries ?? 5_000;
+    this.minimumLevel = options.level ?? "debug";
   }
 
   public info(message: string, metadata?: Record<string, unknown>): void {
-    this.appendEntry("info", message, metadata);
+    if (this.shouldLog("info")) {
+      this.appendEntry("info", message, metadata);
+    }
   }
 
   public warn(message: string, metadata?: Record<string, unknown>): void {
-    this.appendEntry("warn", message, metadata);
+    if (this.shouldLog("warn")) {
+      this.appendEntry("warn", message, metadata);
+    }
   }
 
   public debug(message: string, metadata?: Record<string, unknown>): void {
-    this.appendEntry("debug", message, metadata);
+    if (this.shouldLog("debug")) {
+      this.appendEntry("debug", message, metadata);
+    }
   }
 
   public error(message: string, metadata?: Record<string, unknown>): void {
-    this.appendEntry("error", message, metadata);
+    if (this.shouldLog("error")) {
+      this.appendEntry("error", message, metadata);
+    }
+  }
+
+  private shouldLog(level: RuntimeLogLevel): boolean {
+    return LOG_LEVEL_PRIORITY[level] >= LOG_LEVEL_PRIORITY[this.minimumLevel];
   }
 
   public clear(): void {
