@@ -12,6 +12,17 @@ export interface OpenAICompatibleProviderOptions {
   headers?: Record<string, string> | undefined;
 }
 
+type JsonObject = Record<string, unknown>;
+
+function isJsonObject(value: unknown): value is JsonObject {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function getBodyExcerpt(body: string): string {
+  const excerpt = body.replace(/\s+/g, " ").trim().slice(0, 200);
+  return excerpt.length > 0 ? excerpt : "<empty body>";
+}
+
 export class OpenAICompatibleModelProvider implements ModelProvider {
   public readonly name = "openai-compatible";
   private readonly apiKey: string;
@@ -98,24 +109,66 @@ export class OpenAICompatibleModelProvider implements ModelProvider {
       );
     }
 
-    const data = (await response.json()) as {
-      choices?: Array<{
-        message?: {
-          content?: string;
-        };
-        finish_reason?: string;
-      }>;
-      usage?: Record<string, unknown>;
-      model?: string;
-    };
+    let responseText: string;
+    try {
+      responseText = await response.text();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(
+        `OpenAI-compatible provider failed to read successful HTTP ${response.status} response: ${message}`
+      );
+    }
 
-    const outputText = data.choices?.[0]?.message?.content ?? "";
+    let data: unknown;
+    try {
+      data = JSON.parse(responseText);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(
+        `OpenAI-compatible provider returned invalid JSON for HTTP ${response.status}: ${message}. Body excerpt: ${getBodyExcerpt(responseText)}`
+      );
+    }
+
+    if (!isJsonObject(data)) {
+      throw new Error(
+        `OpenAI-compatible provider returned an invalid response for HTTP ${response.status}: expected a JSON object.`
+      );
+    }
+
+    const choicesValue = data.choices;
+    if (!Array.isArray(choicesValue) || choicesValue.length === 0) {
+      throw new Error(
+        `OpenAI-compatible provider returned an invalid response for HTTP ${response.status}: expected a non-empty choices array.`
+      );
+    }
+
+    const firstChoice = (choicesValue as unknown[])[0];
+    if (!isJsonObject(firstChoice)) {
+      throw new Error(
+        `OpenAI-compatible provider returned an invalid response for HTTP ${response.status}: expected the first choice to be an object.`
+      );
+    }
+
+    const message = firstChoice.message;
+    if (!isJsonObject(message)) {
+      throw new Error(
+        `OpenAI-compatible provider returned an invalid response for HTTP ${response.status}: expected first choice.message to be an object.`
+      );
+    }
+
+    const outputText = message.content;
+    if (typeof outputText !== "string") {
+      throw new Error(
+        `OpenAI-compatible provider returned an invalid response for HTTP ${response.status}: expected first choice.message.content to be a string.`
+      );
+    }
+
     const metadata: Record<string, unknown> = {
       model: data.model ?? this.model
     };
 
-    if (data.choices?.[0]?.finish_reason !== undefined) {
-      metadata.finishReason = data.choices[0].finish_reason;
+    if (firstChoice.finish_reason !== undefined) {
+      metadata.finishReason = firstChoice.finish_reason;
     }
     if (data.usage !== undefined) {
       metadata.usage = data.usage;

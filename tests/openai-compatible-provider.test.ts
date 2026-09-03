@@ -152,6 +152,62 @@ describe("OpenAICompatibleModelProvider", () => {
     expect(response.outputText).toBe("Custom response");
   });
 
+  it.each([
+    ["missing choices", {}, "expected a non-empty choices array"],
+    ["empty choices", { choices: [] }, "expected a non-empty choices array"],
+    [
+      "non-array choices",
+      { choices: {} },
+      "expected a non-empty choices array"
+    ],
+    [
+      "missing message content",
+      { choices: [{ message: {} }] },
+      "expected first choice.message.content to be a string"
+    ],
+    [
+      "invalid message content",
+      { choices: [{ message: { content: 42 } }] },
+      "expected first choice.message.content to be a string"
+    ]
+  ])(
+    "rejects successful responses with %s",
+    async (_description, payload, expectedError) => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        new Response(JSON.stringify(payload), { status: 200 })
+      );
+
+      const provider = new OpenAICompatibleModelProvider({
+        apiKey: "valid-key"
+      });
+
+      await expect(
+        provider.generate({ instructions: "test", input: "test" })
+      ).rejects.toThrowError(expectedError);
+    }
+  );
+
+  it("rejects a successful non-JSON response with status and a bounded body excerpt", async () => {
+    const body = "upstream gateway failure: " + "x".repeat(500);
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(body, { status: 200, statusText: "OK" })
+    );
+
+    const provider = new OpenAICompatibleModelProvider({
+      apiKey: "valid-key"
+    });
+
+    const error = await provider
+      .generate({ instructions: "test", input: "test" })
+      .catch((value: unknown) => value);
+
+    expect(error).toBeInstanceOf(Error);
+    const message = (error as Error).message;
+    expect(message).toContain("HTTP 200");
+    expect(message).toContain(`Body excerpt: ${body.slice(0, 200)}`);
+    expect(message).not.toContain(body.slice(0, 201));
+  });
+
   it("handles non-2xx HTTP responses with descriptive error", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(JSON.stringify({ error: "Invalid API key" }), {
