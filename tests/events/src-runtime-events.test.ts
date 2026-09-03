@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { RuntimeEventBus } from "../runtime-events.js";
+import { RuntimeEventBus } from "../../src/events/runtime-events.js";
 
 describe("RuntimeEventBus max listeners", () => {
   it("warns when exceeding maxListenersPerEvent", () => {
