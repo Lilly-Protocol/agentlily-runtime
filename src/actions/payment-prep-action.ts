@@ -52,7 +52,11 @@ export function createPaymentPrepTool(): ToolDefinition<
 
       const amountStr = String(payload.amount);
       const parsedAmount = Number(amountStr);
-      if (Number.isNaN(parsedAmount) || parsedAmount <= 0) {
+      if (
+        Number.isNaN(parsedAmount) ||
+        !Number.isFinite(parsedAmount) ||
+        parsedAmount <= 0
+      ) {
         throw new RuntimeError(
           "INVALID_TASK",
           "amount must be a positive number.",
