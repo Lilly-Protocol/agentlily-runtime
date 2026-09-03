@@ -3,7 +3,7 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { JsonFileMemoryStore } from "../src/index.js";
+import { JsonFileMemoryStore, RuntimeError } from "../src/index.js";
 
 describe("JsonFileMemoryStore", () => {
   let tempFilePath: string;
@@ -95,7 +95,7 @@ describe("JsonFileMemoryStore", () => {
     expect(await store.countByAgent("nonexistent-agent")).toBe(0);
   });
 
-  it("handles empty or malformed file gracefully", async () => {
+  it("handles empty file safely and rejects malformed or non-array file with STORAGE_CORRUPTED", async () => {
     await mkdir(dirname(tempFilePath), { recursive: true });
     await writeFile(tempFilePath, "   \n  ", "utf-8");
 
@@ -105,13 +105,29 @@ describe("JsonFileMemoryStore", () => {
 
     await writeFile(tempFilePath, "not-valid-json", "utf-8");
     const malformedStore = new JsonFileMemoryStore(tempFilePath);
-    expect(await malformedStore.size()).toBe(0);
-    expect(await malformedStore.listByAgent("agent-1")).toEqual([]);
+    await expect(malformedStore.size()).rejects.toSatisfy((err: unknown) => {
+      expect(err).toBeInstanceOf(RuntimeError);
+      expect((err as RuntimeError).code).toBe("STORAGE_CORRUPTED");
+      return true;
+    });
+    await expect(malformedStore.listByAgent("agent-1")).rejects.toSatisfy((err: unknown) => {
+      expect(err).toBeInstanceOf(RuntimeError);
+      expect((err as RuntimeError).code).toBe("STORAGE_CORRUPTED");
+      return true;
+    });
 
     await writeFile(tempFilePath, JSON.stringify({ notAnArray: true }), "utf-8");
     const objectStore = new JsonFileMemoryStore(tempFilePath);
-    expect(await objectStore.size()).toBe(0);
-    expect(await objectStore.listByAgent("agent-1")).toEqual([]);
+    await expect(objectStore.size()).rejects.toSatisfy((err: unknown) => {
+      expect(err).toBeInstanceOf(RuntimeError);
+      expect((err as RuntimeError).code).toBe("STORAGE_CORRUPTED");
+      return true;
+    });
+    await expect(objectStore.listByAgent("agent-1")).rejects.toSatisfy((err: unknown) => {
+      expect(err).toBeInstanceOf(RuntimeError);
+      expect((err as RuntimeError).code).toBe("STORAGE_CORRUPTED");
+      return true;
+    });
   });
 
   it("supports pagination in listByAgent", async () => {
