@@ -171,6 +171,63 @@ describe("OpenAICompatibleModelProvider", () => {
     );
   });
 
+  it("rejects a successful response with empty choices", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(JSON.stringify({ choices: [] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      })
+    );
+
+    const provider = new OpenAICompatibleModelProvider({
+      apiKey: "valid-key"
+    });
+
+    await expect(
+      provider.generate({ instructions: "test", input: "test" })
+    ).rejects.toThrowError(
+      "OpenAI-compatible provider returned a malformed response for HTTP 200: expected choices to contain at least one entry."
+    );
+  });
+
+  it("rejects a successful response whose message has no content", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(JSON.stringify({ choices: [{ message: {} }] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      })
+    );
+
+    const provider = new OpenAICompatibleModelProvider({
+      apiKey: "valid-key"
+    });
+
+    await expect(
+      provider.generate({ instructions: "test", input: "test" })
+    ).rejects.toThrowError(
+      "OpenAI-compatible provider returned a malformed response for HTTP 200: expected choices[0].message.content to be a string."
+    );
+  });
+
+  it("adds HTTP context and a body excerpt to invalid JSON errors", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response("upstream returned HTML instead", {
+        status: 200,
+        headers: { "Content-Type": "text/html" }
+      })
+    );
+
+    const provider = new OpenAICompatibleModelProvider({
+      apiKey: "valid-key"
+    });
+
+    await expect(
+      provider.generate({ instructions: "test", input: "test" })
+    ).rejects.toThrowError(
+      "OpenAI-compatible provider returned invalid JSON for HTTP 200: upstream returned HTML instead"
+    );
+  });
+
   it("handles network failure gracefully", async () => {
     vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(
       new Error("ECONNREFUSED")
