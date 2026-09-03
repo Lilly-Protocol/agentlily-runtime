@@ -98,7 +98,8 @@ export class OpenAICompatibleModelProvider implements ModelProvider {
       );
     }
 
-    const data = (await response.json()) as {
+    const rawText = await response.text();
+    let data: {
       choices?: Array<{
         message?: {
           content?: string;
@@ -109,13 +110,41 @@ export class OpenAICompatibleModelProvider implements ModelProvider {
       model?: string;
     };
 
-    const outputText = data.choices?.[0]?.message?.content ?? "";
+    try {
+      data = JSON.parse(rawText);
+    } catch {
+      const excerpt = rawText.slice(0, 100);
+      throw new Error(
+        `OpenAI-compatible provider returned malformed JSON (HTTP ${response.status}): "${excerpt}"`
+      );
+    }
+
+    if (!data || typeof data !== "object") {
+      throw new Error(
+        `OpenAI-compatible provider returned non-object response payload (HTTP ${response.status}).`
+      );
+    }
+
+    if (!Array.isArray(data.choices) || data.choices.length === 0) {
+      throw new Error(
+        `OpenAI-compatible provider returned malformed response: missing or empty "choices" array (HTTP ${response.status}).`
+      );
+    }
+
+    const firstChoice = data.choices[0];
+    if (!firstChoice || typeof firstChoice.message?.content !== "string") {
+      throw new Error(
+        `OpenAI-compatible provider returned malformed response: choice message content is missing or not a string (HTTP ${response.status}).`
+      );
+    }
+
+    const outputText = firstChoice.message.content;
     const metadata: Record<string, unknown> = {
       model: data.model ?? this.model
     };
 
-    if (data.choices?.[0]?.finish_reason !== undefined) {
-      metadata.finishReason = data.choices[0].finish_reason;
+    if (firstChoice.finish_reason !== undefined) {
+      metadata.finishReason = firstChoice.finish_reason;
     }
     if (data.usage !== undefined) {
       metadata.usage = data.usage;

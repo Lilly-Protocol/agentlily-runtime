@@ -186,4 +186,66 @@ describe("OpenAICompatibleModelProvider", () => {
       "OpenAI-compatible provider request failed: ECONNREFUSED"
     );
   });
+
+  it("rejects when choices array is empty", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(JSON.stringify({ choices: [] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      })
+    );
+
+    const provider = new OpenAICompatibleModelProvider({
+      apiKey: "valid-key"
+    });
+
+    await expect(
+      provider.generate({ instructions: "test", input: "test" })
+    ).rejects.toThrowError(
+      'OpenAI-compatible provider returned malformed response: missing or empty "choices" array (HTTP 200).'
+    );
+  });
+
+  it("rejects when choice message has missing or non-string content", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          choices: [{ index: 0, message: {} }]
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        }
+      )
+    );
+
+    const provider = new OpenAICompatibleModelProvider({
+      apiKey: "valid-key"
+    });
+
+    await expect(
+      provider.generate({ instructions: "test", input: "test" })
+    ).rejects.toThrowError(
+      "OpenAI-compatible provider returned malformed response: choice message content is missing or not a string (HTTP 200)."
+    );
+  });
+
+  it("rejects when response body is not valid JSON with HTTP status and excerpt", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response("<html><body>502 Bad Gateway</body></html>", {
+        status: 200,
+        headers: { "Content-Type": "text/html" }
+      })
+    );
+
+    const provider = new OpenAICompatibleModelProvider({
+      apiKey: "valid-key"
+    });
+
+    await expect(
+      provider.generate({ instructions: "test", input: "test" })
+    ).rejects.toThrowError(
+      'OpenAI-compatible provider returned malformed JSON (HTTP 200): "<html><body>502 Bad Gateway</body></html>"'
+    );
+  });
 });
