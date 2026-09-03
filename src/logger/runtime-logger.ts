@@ -15,6 +15,13 @@ const LOG_LEVEL_PRIORITY: Record<RuntimeLogLevel, number> = {
   error: 3
 };
 
+function shouldLog(
+  level: RuntimeLogLevel,
+  minimumLevel: RuntimeLogLevel
+): boolean {
+  return LOG_LEVEL_PRIORITY[level] >= LOG_LEVEL_PRIORITY[minimumLevel];
+}
+
 export interface ConsoleRuntimeLoggerOptions {
   level?: RuntimeLogLevel;
   redactKeys?: RegExp;
@@ -57,31 +64,27 @@ export class ConsoleRuntimeLogger implements RuntimeLogger {
   }
 
   public info(message: string, metadata?: Record<string, unknown>): void {
-    if (this.shouldLog("info")) {
+    if (shouldLog("info", this.minimumLevel)) {
       console.info(message, this.prepareMetadata(metadata));
     }
   }
 
   public warn(message: string, metadata?: Record<string, unknown>): void {
-    if (this.shouldLog("warn")) {
+    if (shouldLog("warn", this.minimumLevel)) {
       console.warn(message, this.prepareMetadata(metadata));
     }
   }
 
   public debug(message: string, metadata?: Record<string, unknown>): void {
-    if (this.shouldLog("debug")) {
+    if (shouldLog("debug", this.minimumLevel)) {
       console.debug(message, this.prepareMetadata(metadata));
     }
   }
 
   public error(message: string, metadata?: Record<string, unknown>): void {
-    if (this.shouldLog("error")) {
+    if (shouldLog("error", this.minimumLevel)) {
       console.error(message, this.prepareMetadata(metadata));
     }
-  }
-
-  private shouldLog(level: RuntimeLogLevel): boolean {
-    return LOG_LEVEL_PRIORITY[level] >= LOG_LEVEL_PRIORITY[this.minimumLevel];
   }
 
   private prepareMetadata(
@@ -95,6 +98,8 @@ export class ConsoleRuntimeLogger implements RuntimeLogger {
 }
 
 export interface InMemoryRuntimeLoggerOptions {
+  /** Minimum level to retain; defaults to debug to preserve all-level recording. */
+  level?: RuntimeLogLevel;
   maxEntries?: number;
 }
 
@@ -106,9 +111,11 @@ interface InMemoryLogEntry {
 
 export class InMemoryRuntimeLogger implements RuntimeLogger {
   public readonly entries: InMemoryLogEntry[] = [];
+  private readonly minimumLevel: RuntimeLogLevel;
   private readonly maxEntries: number;
 
   public constructor(options: InMemoryRuntimeLoggerOptions = {}) {
+    this.minimumLevel = options.level ?? "debug";
     this.maxEntries = options.maxEntries ?? 5_000;
   }
 
@@ -141,6 +148,9 @@ export class InMemoryRuntimeLogger implements RuntimeLogger {
     message: string,
     metadata?: Record<string, unknown>
   ): void {
+    if (!shouldLog(level, this.minimumLevel)) {
+      return;
+    }
     if (this.maxEntries > 0 && this.entries.length >= this.maxEntries) {
       this.entries.shift();
     }
