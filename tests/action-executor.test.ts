@@ -44,6 +44,40 @@ describe("ActionExecutor", () => {
     expect(executor.getToolCallCount("task-1")).toBe(2);
   });
 
+  it("does not consume a call when the tool is not registered", async () => {
+    const registry = new ToolRegistry();
+    const executor = new ActionExecutor(registry);
+    const ctx = createMockContext("task-missing-tool");
+
+    await expect(executor.execute("missing", {}, ctx)).rejects.toMatchObject({
+      name: "RuntimeError",
+      code: "TOOL_NOT_FOUND",
+      details: { toolName: "missing" }
+    });
+
+    expect(executor.getToolCallCount(ctx.taskId)).toBe(0);
+  });
+
+  it("allows a valid call after an unknown tool with a one-call limit", async () => {
+    const registry = new ToolRegistry();
+    registry.register({
+      name: "ping",
+      description: "Ping tool",
+      execute() {
+        return "pong";
+      }
+    });
+
+    const executor = new ActionExecutor(registry, 1);
+    const ctx = createMockContext("task-retry-after-missing-tool");
+
+    await expect(executor.execute("missing", {}, ctx)).rejects.toMatchObject({
+      code: "TOOL_NOT_FOUND"
+    });
+    await expect(executor.execute("ping", {}, ctx)).resolves.toBe("pong");
+    expect(executor.getToolCallCount(ctx.taskId)).toBe(1);
+  });
+
   it("enforces maxToolCallsPerTask policy limit", async () => {
     const registry = new ToolRegistry();
     registry.register({
