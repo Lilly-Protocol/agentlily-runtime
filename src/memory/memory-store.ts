@@ -41,6 +41,21 @@ export interface MemoryStore {
 export const DEFAULT_MAX_MEMORY_ENTRIES = 10_000;
 export const DEFAULT_MAX_MEMORY_ENTRIES_PER_AGENT = 1_000;
 
+const cloneOutput = (val: unknown): unknown => {
+  if (val === null || typeof val !== "object") {
+    return val;
+  }
+  try {
+    return structuredClone(val);
+  } catch {
+    try {
+      return JSON.parse(JSON.stringify(val));
+    } catch {
+      return val;
+    }
+  }
+};
+
 export class InMemoryMemoryStore implements MemoryStore {
   private readonly entries: MemoryEntry[] = [];
 
@@ -75,7 +90,7 @@ export class InMemoryMemoryStore implements MemoryStore {
       agentId: entry.agentId,
       taskId: entry.taskId,
       input: entry.input,
-      output: entry.output,
+      output: cloneOutput(entry.output),
       recordedAt: entry.recordedAt
     };
 
@@ -115,7 +130,10 @@ export class InMemoryMemoryStore implements MemoryStore {
     const limit = options?.limit ?? matching.length;
 
     const slice = matching.slice(offset, offset + limit);
-    return slice.map((entry) => ({ ...entry }));
+    return slice.map((entry) => ({
+      ...entry,
+      output: cloneOutput(entry.output)
+    }));
   }
 
   public async countByAgent(agentId: string): Promise<number> {
