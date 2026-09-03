@@ -186,4 +186,85 @@ describe("OpenAICompatibleModelProvider", () => {
       "OpenAI-compatible provider request failed: ECONNREFUSED"
     );
   });
+
+  it("rejects when response body is not valid JSON and includes HTTP status and body excerpt", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response("<html>502 Bad Gateway</html>", {
+        status: 200,
+        headers: { "Content-Type": "text/html" }
+      })
+    );
+
+    const provider = new OpenAICompatibleModelProvider({
+      apiKey: "valid-key"
+    });
+
+    await expect(
+      provider.generate({ instructions: "test", input: "test" })
+    ).rejects.toThrowError(
+      "OpenAI-compatible provider returned invalid JSON (HTTP 200): <html>502 Bad Gateway</html>"
+    );
+  });
+
+  it("rejects when choices array is empty", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(JSON.stringify({ choices: [] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      })
+    );
+
+    const provider = new OpenAICompatibleModelProvider({
+      apiKey: "valid-key"
+    });
+
+    await expect(
+      provider.generate({ instructions: "test", input: "test" })
+    ).rejects.toThrowError(
+      'OpenAI-compatible provider response missing non-empty "choices" array.'
+    );
+  });
+
+  it("rejects when choices field is missing", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(JSON.stringify({ model: "gpt-4o-mini" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      })
+    );
+
+    const provider = new OpenAICompatibleModelProvider({
+      apiKey: "valid-key"
+    });
+
+    await expect(
+      provider.generate({ instructions: "test", input: "test" })
+    ).rejects.toThrowError(
+      'OpenAI-compatible provider response missing non-empty "choices" array.'
+    );
+  });
+
+  it("rejects when choice message content is missing or not a string", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          choices: [{ index: 0, message: { role: "assistant" } }]
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        }
+      )
+    );
+
+    const provider = new OpenAICompatibleModelProvider({
+      apiKey: "valid-key"
+    });
+
+    await expect(
+      provider.generate({ instructions: "test", input: "test" })
+    ).rejects.toThrowError(
+      "OpenAI-compatible provider choice missing string message content."
+    );
+  });
 });
