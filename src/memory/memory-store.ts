@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
+import { RuntimeError } from "../errors/runtime-errors.js";
 
 export interface MemoryEntry {
   agentId: string;
@@ -155,22 +156,37 @@ export class JsonFileMemoryStore implements MemoryStore {
       return this.memoryCache;
     }
 
-    try {
-      const raw = await readFile(this.filePath, "utf-8");
-      if (raw.trim().length === 0) {
-        this.memoryCache = [];
-        return this.memoryCache;
-      }
-      const parsed: unknown = JSON.parse(raw);
-      if (Array.isArray(parsed)) {
-        this.memoryCache = parsed as MemoryEntry[];
-      } else {
-        this.memoryCache = [];
-      }
-    } catch {
+    const raw = await readFile(this.filePath, "utf-8");
+    if (raw.trim().length === 0) {
       this.memoryCache = [];
+      return this.memoryCache;
     }
 
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (cause) {
+      throw new RuntimeError(
+        "STORAGE_CORRUPTION",
+        `Corrupted JsonFileMemoryStore file at ${this.filePath}: invalid JSON content.`,
+        {
+          filePath: this.filePath,
+          cause: cause instanceof Error ? cause.message : String(cause)
+        }
+      );
+    }
+
+    if (!Array.isArray(parsed)) {
+      throw new RuntimeError(
+        "STORAGE_CORRUPTION",
+        `Corrupted JsonFileMemoryStore file at ${this.filePath}: expected JSON array of memory entries.`,
+        {
+          filePath: this.filePath
+        }
+      );
+    }
+
+    this.memoryCache = parsed as MemoryEntry[];
     return this.memoryCache;
   }
 
