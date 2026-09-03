@@ -82,7 +82,21 @@ export class AgentRuntime {
     this.started = false;
 
     if (options.drainTimeoutMs !== undefined && options.drainTimeoutMs > 0) {
+      const drainStartedAt = Date.now();
       await this.drainInFlightTasks(options.drainTimeoutMs);
+      if (this.inFlightTasks.size > 0) {
+        const elapsedMs = Math.max(0, Date.now() - drainStartedAt);
+        const strandedTaskIds = Array.from(this.inFlightTasks);
+        this.dependencies.logger.warn(
+          `Runtime stop drain timed out with ${strandedTaskIds.length} in-flight task(s) still active: ${strandedTaskIds.join(", ")}`,
+          {
+            runtimeId: this.runtimeId,
+            strandedTaskIds,
+            elapsedMs,
+            drainTimeoutMs: options.drainTimeoutMs
+          }
+        );
+      }
     }
 
     if (options.clearListeners === true) {
