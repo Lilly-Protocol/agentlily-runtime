@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { dirname, resolve } from "node:path";
 
 export interface MemoryEntry {
   agentId: string;
@@ -133,6 +133,33 @@ export class InMemoryMemoryStore implements MemoryStore {
   }
 }
 
+// Global write serialization queues keyed by normalized canonical file path
+const fileWriteQueues = new Map<string, Promise<unknown>>();
+
+const serializeFileOperation = <T>(
+  filePath: string,
+  operation: () => Promise<T>
+): Promise<T> => {
+  const canonicalPath = resolve(filePath);
+  const currentQueue = fileWriteQueues.get(canonicalPath) ?? Promise.resolve();
+
+  const nextPromise = currentQueue
+    .catch(() => {})
+    .then(async () => {
+      return await operation();
+    });
+
+  fileWriteQueues.set(canonicalPath, nextPromise);
+
+  nextPromise.finally(() => {
+    if (fileWriteQueues.get(canonicalPath) === nextPromise) {
+      fileWriteQueues.delete(canonicalPath);
+    }
+  });
+
+  return nextPromise;
+};
+
 export class JsonFileMemoryStore implements MemoryStore {
   private readonly filePath: string;
   private memoryCache: MemoryEntry[] | null = null;
@@ -145,57 +172,89 @@ export class JsonFileMemoryStore implements MemoryStore {
     return this.filePath;
   }
 
-  private async loadEntries(): Promise<MemoryEntry[]> {
-    if (this.memoryCache !== null) {
-      return this.memoryCache;
-    }
-
+  private async readEntriesFromDisk(): Promise<MemoryEntry[]> {
     if (!existsSync(this.filePath)) {
-      this.memoryCache = [];
-      return this.memoryCache;
+      return [];
     }
 
     try {
       const raw = await readFile(this.filePath, "utf-8");
       if (raw.trim().length === 0) {
-        this.memoryCache = [];
-        return this.memoryCache;
+        return [];
       }
       const parsed: unknown = JSON.parse(raw);
       if (Array.isArray(parsed)) {
-        this.memoryCache = parsed as MemoryEntry[];
-      } else {
-        this.memoryCache = [];
+        return parsed as MemoryEntry[];
       }
+      return [];
     } catch {
-      this.memoryCache = [];
+      return [];
+    }
+  }
+
+  private async loadEntries(): Promise<MemoryEntry[]> {
+    if (this.memoryCache !== null) {
+      return this.memoryCache;
     }
 
+    const loaded = await this.readEntriesFromDisk();
+    this.memoryCache = loaded;
     return this.memoryCache;
   }
 
-  private async flush(): Promise<void> {
+  private async flushAtomic(entries: MemoryEntry[]): Promise<void> {
     const dir = dirname(this.filePath);
     if (dir && dir !== "." && !existsSync(dir)) {
       await mkdir(dir, { recursive: true });
     }
-    const data = JSON.stringify(this.memoryCache ?? [], null, 2);
-    await writeFile(this.filePath, data, "utf-8");
+    const data = JSON.stringify(entries, null, 2);
+    const tempPath = `${this.filePath}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`;
+    await writeFile(tempPath, data, "utf-8");
+    await rename(tempPath, this.filePath);
   }
 
   public async append(entry: MemoryEntry): Promise<void> {
-    const entries = await this.loadEntries();
-    entries.push(entry);
-    await this.flush();
+    await serializeFileOperation(this.filePath, async () => {
+      // Always re-read from disk to capture any concurrent updates from other instances or processes
+      const entries = await this.readEntriesFromDisk();
+      entries.push({
+        agentId: entry.agentId,
+        taskId: entry.taskId,
+        input: entry.input,
+        output: entry.output,
+        recordedAt: entry.recordedAt
+      });
+      await this.flushAtomic(entries);
+      this.memoryCache = entries;
+    });
   }
 
-  public async listByAgent(agentId: string): Promise<MemoryEntry[]> {
-    const entries = await this.loadEntries();
-    return entries.filter((entry) => entry.agentId === agentId);
+  public async listByAgent(
+    agentId: string,
+    options?: ListMemoryOptions
+  ): Promise<MemoryEntry[]> {
+    return await serializeFileOperation(this.filePath, async () => {
+      const entries = await this.readEntriesFromDisk();
+      this.memoryCache = entries;
+      const matching = entries.filter((item) => item.agentId === agentId);
+      const offset = options?.offset ?? 0;
+      const limit = options?.limit ?? matching.length;
+      return matching.slice(offset, offset + limit).map((e) => ({ ...e }));
+    });
+  }
+
+  public async countByAgent(agentId: string): Promise<number> {
+    return await serializeFileOperation(this.filePath, async () => {
+      const entries = await this.readEntriesFromDisk();
+      this.memoryCache = entries;
+      return entries.filter((item) => item.agentId === agentId).length;
+    });
   }
 
   public async clear(): Promise<void> {
-    this.memoryCache = [];
-    await this.flush();
+    await serializeFileOperation(this.filePath, async () => {
+      this.memoryCache = [];
+      await this.flushAtomic([]);
+    });
   }
 }
