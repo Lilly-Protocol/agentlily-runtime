@@ -77,3 +77,65 @@ describe("TaskRunner INVALID_TASK rejection paths", () => {
     }
   });
 });
+
+describe("TaskRunner RuntimeError preservation vs generic wrap", () => {
+  it("preserves RuntimeError instance unchanged with its original code, message, and details", async () => {
+    const customError = new RuntimeError("DUPLICATE_TOOL", "Custom tool error", {
+      customField: "custom-value",
+      numericVal: 42
+    });
+
+    const throwingExecutor = {
+      execute: async () => {
+        throw customError;
+      }
+    };
+    const memoryStore = new InMemoryMemoryStore();
+    const runner = new TaskRunner(throwingExecutor as any, memoryStore);
+    const ctx = {} as any;
+
+    try {
+      await runner.run(
+        { taskId: "task-custom", agentId: "agent-custom", toolName: "tool-custom", input: "input-custom", payload: {} },
+        ctx
+      );
+      expect.fail("should have thrown");
+    } catch (e) {
+      expect(e).toBe(customError);
+      const err = e as RuntimeError;
+      expect(err.code).toBe("DUPLICATE_TOOL");
+      expect(err.message).toBe("Custom tool error");
+      expect(err.details).toEqual({
+        customField: "custom-value",
+        numericVal: 42
+      });
+    }
+  });
+
+  it("wraps non-RuntimeError exceptions in EXECUTION_FAILED preserving the error message and cause", async () => {
+    const genericError = new Error("Something went unexpectedly wrong");
+
+    const throwingExecutor = {
+      execute: async () => {
+        throw genericError;
+      }
+    };
+    const memoryStore = new InMemoryMemoryStore();
+    const runner = new TaskRunner(throwingExecutor as any, memoryStore);
+    const ctx = {} as any;
+
+    try {
+      await runner.run(
+        { taskId: "task-gen", agentId: "agent-gen", toolName: "tool-gen", input: "input-gen", payload: {} },
+        ctx
+      );
+      expect.fail("should have thrown");
+    } catch (e) {
+      const err = e as RuntimeError;
+      expect(err).toBeInstanceOf(RuntimeError);
+      expect(err.code).toBe("EXECUTION_FAILED");
+      expect(err.message).toBe("Something went unexpectedly wrong");
+      expect(err.details?.cause).toBe("Something went unexpectedly wrong");
+    }
+  });
+});
