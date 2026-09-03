@@ -133,16 +133,36 @@ export class InMemoryMemoryStore implements MemoryStore {
   }
 }
 
+export interface JsonFileMemoryStoreOptions {
+  maxEntries?: number;
+}
+
 export class JsonFileMemoryStore implements MemoryStore {
   private readonly filePath: string;
   private memoryCache: MemoryEntry[] | null = null;
+  public readonly maxEntries: number;
 
-  public constructor(filePath: string) {
+  public constructor(
+    filePath: string,
+    options: JsonFileMemoryStoreOptions | number = {}
+  ) {
     this.filePath = filePath;
+    const resolved =
+      typeof options === "number" ? { maxEntries: options } : options;
+    this.maxEntries = resolved.maxEntries ?? DEFAULT_MAX_MEMORY_ENTRIES;
   }
 
   public getFilePath(): string {
     return this.filePath;
+  }
+
+  public get capacity(): number {
+    return this.maxEntries;
+  }
+
+  public async size(): Promise<number> {
+    const entries = await this.loadEntries();
+    return entries.length;
   }
 
   private async loadEntries(): Promise<MemoryEntry[]> {
@@ -185,13 +205,44 @@ export class JsonFileMemoryStore implements MemoryStore {
 
   public async append(entry: MemoryEntry): Promise<void> {
     const entries = await this.loadEntries();
-    entries.push(entry);
+    const entryCopy: MemoryEntry = {
+      agentId: entry.agentId,
+      taskId: entry.taskId,
+      input: entry.input,
+      output: entry.output,
+      recordedAt: entry.recordedAt
+    };
+
+    if (this.maxEntries > 0 && entries.length >= this.maxEntries) {
+      entries.shift();
+    }
+
+    entries.push(entryCopy);
     await this.flush();
   }
 
-  public async listByAgent(agentId: string): Promise<MemoryEntry[]> {
+  public async listByAgent(
+    agentId: string,
+    options?: ListMemoryOptions
+  ): Promise<MemoryEntry[]> {
     const entries = await this.loadEntries();
-    return entries.filter((entry) => entry.agentId === agentId);
+    const matching = entries.filter((entry) => entry.agentId === agentId);
+    const offset = options?.offset ?? 0;
+    const limit = options?.limit ?? matching.length;
+    return matching
+      .slice(offset, offset + limit)
+      .map((entry) => ({ ...entry }));
+  }
+
+  public async countByAgent(agentId: string): Promise<number> {
+    const entries = await this.loadEntries();
+    let count = 0;
+    for (const entry of entries) {
+      if (entry.agentId === agentId) {
+        count++;
+      }
+    }
+    return count;
   }
 
   public async clear(): Promise<void> {
