@@ -104,10 +104,24 @@ export class AgentRuntime {
     });
   }
 
+  /**
+   * Execute a task on the runtime.
+   *
+   * Note: Task IDs must be unique while in flight. Attempting to start a task with
+   * a `taskId` that is already actively running will reject with a DUPLICATE_IN_FLIGHT_TASK error.
+   */
   public async executeTask<TPayload, TResult>(
     task: RuntimeTask<TPayload>
   ): Promise<TaskExecutionResult<TResult>> {
     assertRuntimeStarted(this.started);
+
+    if (this.inFlightTasks.has(task.taskId)) {
+      throw new RuntimeError(
+        "DUPLICATE_IN_FLIGHT_TASK",
+        `Task "${task.taskId}" is already in flight.`,
+        { taskId: task.taskId }
+      );
+    }
 
     const agent = this.dependencies.agentManager.getOrCreate(task.agentId);
     const context: RuntimeContext = {
