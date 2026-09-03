@@ -130,4 +130,35 @@ describe("PaymentPrepAction", () => {
       })
     ).toThrowError(RuntimeError);
   });
+
+  it("rejects non-finite amount values such as Infinity, NaN, and 1e309 with INVALID_TASK (issue #239)", async () => {
+    const tool = createPaymentPrepTool();
+    const context = createMockContext("task-pay-6");
+
+    const nonFiniteValues = [
+      "Infinity",
+      "-Infinity",
+      "NaN",
+      "1e309",
+      Infinity,
+      -Infinity,
+      NaN
+    ];
+
+    for (const amount of nonFiniteValues) {
+      try {
+        await tool.execute({
+          payload: {
+            walletId: "GWALLET123",
+            amount: amount as any
+          },
+          context
+        });
+        expect.unreachable();
+      } catch (err) {
+        expect(err).toBeInstanceOf(RuntimeError);
+        expect((err as RuntimeError).code).toBe("INVALID_TASK");
+      }
+    }
+  });
 });
