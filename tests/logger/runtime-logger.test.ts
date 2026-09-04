@@ -50,6 +50,74 @@ describe("InMemoryRuntimeLogger", () => {
       "info"
     ]);
   });
+
+  describe("maxEntries eviction", () => {
+    it("evicts oldest entry when info() exceeds maxEntries", () => {
+      const logger = new InMemoryRuntimeLogger({ maxEntries: 2 });
+      logger.info("a");
+      logger.info("b");
+      logger.info("c");
+      expect(logger.entries).toHaveLength(2);
+      expect(logger.entries.map((e) => e.message)).toEqual(["b", "c"]);
+    });
+
+    it("evicts oldest entry when error() exceeds maxEntries", () => {
+      const logger = new InMemoryRuntimeLogger({ maxEntries: 2 });
+      logger.error("x");
+      logger.error("y");
+      logger.error("z");
+      expect(logger.entries).toHaveLength(2);
+      expect(logger.entries.map((e) => e.message)).toEqual(["y", "z"]);
+    });
+
+    it("enforces maxEntries for warn() calls (#232)", () => {
+      const logger = new InMemoryRuntimeLogger({ maxEntries: 2 });
+      logger.warn("w1");
+      logger.warn("w2");
+      logger.warn("w3");
+      expect(logger.entries.length).toBeLessThanOrEqual(2);
+      expect(logger.entries.map((e) => e.message)).toEqual(["w2", "w3"]);
+    });
+
+    it("enforces maxEntries for debug() calls (#232)", () => {
+      const logger = new InMemoryRuntimeLogger({ maxEntries: 2 });
+      logger.debug("d1");
+      logger.debug("d2");
+      logger.debug("d3");
+      expect(logger.entries.length).toBeLessThanOrEqual(2);
+      expect(logger.entries.map((e) => e.message)).toEqual(["d2", "d3"]);
+    });
+
+    it("enforces maxEntries across mixed-level sequences (#232)", () => {
+      const logger = new InMemoryRuntimeLogger({ maxEntries: 3 });
+      logger.info("i1");
+      logger.warn("w1");
+      logger.debug("d1");
+      logger.error("e1");
+      expect(logger.entries).toHaveLength(3);
+      expect(logger.entries.map((e) => `${e.level}:${e.message}`)).toEqual([
+        "warn:w1",
+        "debug:d1",
+        "error:e1"
+      ]);
+    });
+
+    it("preserves insertion order with eviction across all levels", () => {
+      const logger = new InMemoryRuntimeLogger({ maxEntries: 4 });
+      logger.debug("d1");
+      logger.info("i1");
+      logger.warn("w1");
+      logger.error("e1");
+      logger.debug("d2");
+      expect(logger.entries).toHaveLength(4);
+      expect(logger.entries.map((e) => `${e.level}:${e.message}`)).toEqual([
+        "info:i1",
+        "warn:w1",
+        "error:e1",
+        "debug:d2"
+      ]);
+    });
+  });
 });
 
 describe("ConsoleRuntimeLogger", () => {
