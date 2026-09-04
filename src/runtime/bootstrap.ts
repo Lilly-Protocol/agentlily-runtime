@@ -36,7 +36,11 @@ export function createRuntimeDependencies(options: RuntimeOptions) {
     options.maxToolCallsPerTask,
     eventBus
   );
-  const taskRunner = new TaskRunner(actionExecutor, memoryStore);
+  const taskRunner = new TaskRunner(
+    actionExecutor,
+    memoryStore,
+    options.maxTaskDurationMs
+  );
 
   return {
     actionExecutor,

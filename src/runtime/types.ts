@@ -8,6 +8,7 @@ import type { ToolDefinition } from "../tools/types.js";
 export interface RuntimeOptions {
   runtimeId: string;
   maxToolCallsPerTask?: number;
+  maxTaskDurationMs?: number;
   memoryStore?: MemoryStore;
   memoryStoragePath?: string | undefined;
   modelProvider?: ModelProvider;
