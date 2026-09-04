@@ -55,6 +55,8 @@ export type {
 } from "./logger/runtime-logger.js";
 export type {
   InMemoryMemoryStoreOptions,
+  JsonFileMemoryStoreOptions,
+  ListMemoryOptions,
   MemoryEntry,
   MemoryStore
 } from "./memory/memory-store.js";
