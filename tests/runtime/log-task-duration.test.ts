@@ -48,7 +48,8 @@ describe("Task execution duration logging", () => {
     // Verify completion log includes durationMs
     const completionLog = logger.info.mock.calls.find(
       (call: any[]) =>
-        typeof call[0] === "string" && call[0].includes("completed")
+        typeof call[0] === "string" &&
+        call[0].includes("Runtime task completed")
     );
     expect(completionLog).toBeDefined();
     expect(completionLog![1]).toHaveProperty("durationMs");
