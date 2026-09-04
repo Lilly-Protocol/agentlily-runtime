@@ -48,4 +48,36 @@ describe("InMemoryRuntimeStateStore put/get round trips", () => {
     expect(await store.get<string>("b")).toBe("beta");
     expect(await store.get<string>("c")).toBe("gamma");
   });
+
+  it("supports has, delete, clear, size, and keys methods", async () => {
+    const store = new InMemoryRuntimeStateStore({ maxEntries: 2 });
+    expect(await store.has("k1")).toBe(false);
+    expect(await store.size()).toBe(0);
+    expect(await store.keys()).toEqual([]);
+
+    await store.put("k1", "v1");
+    expect(await store.has("k1")).toBe(true);
+    expect(await store.size()).toBe(1);
+    expect(await store.keys()).toEqual(["k1"]);
+
+    await store.put("k2", "v2");
+    expect(await store.size()).toBe(2);
+    expect(await store.keys()).toEqual(["k1", "k2"]);
+
+    // Eviction on exceeding maxEntries
+    await store.put("k3", "v3");
+    expect(await store.size()).toBe(2);
+    expect(await store.has("k1")).toBe(false);
+    expect(await store.has("k2")).toBe(true);
+    expect(await store.has("k3")).toBe(true);
+    expect(await store.keys()).toEqual(["k2", "k3"]);
+
+    expect(await store.delete("k2")).toBe(true);
+    expect(await store.delete("k2")).toBe(false);
+    expect(await store.size()).toBe(1);
+
+    await store.clear();
+    expect(await store.size()).toBe(0);
+    expect(await store.keys()).toEqual([]);
+  });
 });

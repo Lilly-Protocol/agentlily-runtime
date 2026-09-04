@@ -36,4 +36,13 @@ describe("UnconfiguredModelProvider", () => {
 
     expect(r1.outputText).toBe(r2.outputText);
   });
+
+  it("handles undefined instructions or input gracefully in metadata", async () => {
+    const response = await provider.generate({} as unknown as { instructions: string; input: string });
+    expect(response.metadata).toEqual({
+      warning: "unconfigured_provider",
+      instructionsLength: 0,
+      inputLength: 0
+    });
+  });
 });
