@@ -85,4 +85,24 @@ describe("ConsoleRuntimeLogger", () => {
     logger.error("error with meta", meta);
     expect(errorSpy).toHaveBeenCalledWith("error with meta", meta);
   });
+
+  it("suppresses info below a warn threshold", () => {
+    const logger = new ConsoleRuntimeLogger({ level: "warn" });
+
+    logger.info("verbose message");
+    logger.error("important message");
+
+    expect(infoSpy).not.toHaveBeenCalled();
+    expect(errorSpy).toHaveBeenCalledWith("important message", {});
+  });
+
+  it("allows only errors at the error threshold", () => {
+    const logger = new ConsoleRuntimeLogger({ level: "error" });
+
+    logger.info("verbose message");
+    logger.error("error message");
+
+    expect(infoSpy).not.toHaveBeenCalled();
+    expect(errorSpy).toHaveBeenCalledOnce();
+  });
 });

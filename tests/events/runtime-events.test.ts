@@ -75,4 +75,11 @@ describe("RuntimeEventBus", () => {
     expect(l2).toHaveBeenCalledTimes(1);
     expect(otherListener).not.toHaveBeenCalled();
   });
+
+  it.each([0, -1, 1.5, Number.NaN])(
+    "rejects invalid maxListeners value %s",
+    (maxListeners) => {
+      expect(() => new RuntimeEventBus({ maxListeners })).toThrow(RangeError);
+    }
+  );
 });
