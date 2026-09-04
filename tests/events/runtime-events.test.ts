@@ -75,4 +75,69 @@ describe("RuntimeEventBus", () => {
     expect(l2).toHaveBeenCalledTimes(1);
     expect(otherListener).not.toHaveBeenCalled();
   });
+
+  it("fires once() listener exactly once and automatically deregisters", () => {
+    const bus = new RuntimeEventBus();
+    const listener = vi.fn();
+
+    bus.once("runtime.started", listener);
+    expect(bus.listenerCount("runtime.started")).toBe(1);
+
+    bus.emit({
+      name: "runtime.started",
+      payload: { runtimeId: "rt-once-1", occurredAt: "2026-09-01T00:00:00Z" }
+    });
+
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(bus.listenerCount("runtime.started")).toBe(0);
+
+    bus.emit({
+      name: "runtime.started",
+      payload: { runtimeId: "rt-once-2", occurredAt: "2026-09-01T00:00:01Z" }
+    });
+
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
+
+  it("allows off() to remove a listener registered via once() before it fires (Issue #251)", () => {
+    const bus = new RuntimeEventBus();
+    const listener = vi.fn();
+
+    bus.once("runtime.task.failed", listener);
+    expect(bus.listenerCount("runtime.task.failed")).toBe(1);
+
+    const removed = bus.off("runtime.task.failed", listener);
+    expect(removed).toBe(true);
+    expect(bus.listenerCount("runtime.task.failed")).toBe(0);
+
+    bus.emit({
+      name: "runtime.task.failed",
+      payload: {
+        runtimeId: "rt-1",
+        taskId: "t-1",
+        agentId: "a-1",
+        reason: "test failure"
+      }
+    });
+
+    expect(listener).not.toHaveBeenCalled();
+  });
+
+  it("handles unsubscribe returned by once() correctly", () => {
+    const bus = new RuntimeEventBus();
+    const listener = vi.fn();
+
+    const unsubscribe = bus.once("runtime.stopped", listener);
+    expect(bus.listenerCount("runtime.stopped")).toBe(1);
+
+    unsubscribe();
+    expect(bus.listenerCount("runtime.stopped")).toBe(0);
+
+    bus.emit({
+      name: "runtime.stopped",
+      payload: { runtimeId: "rt-1", occurredAt: "2026-09-01T00:00:00Z" }
+    });
+
+    expect(listener).not.toHaveBeenCalled();
+  });
 });
