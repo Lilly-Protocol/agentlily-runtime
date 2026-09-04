@@ -3,31 +3,50 @@ import {
   ActionExecutor,
   AgentInstanceManager,
   InMemoryMemoryStore,
+  RuntimeError,
   TaskRunner,
   ToolRegistry,
   UnconfiguredModelProvider,
   InMemoryRuntimeStateStore
 } from "../src/index.js";
+import type { RuntimeContext } from "../src/index.js";
+import type { ToolDefinition } from "../src/index.js";
+
+function createRunner(tool: ToolDefinition) {
+  const toolRegistry = new ToolRegistry();
+  toolRegistry.register(tool);
+
+  return new TaskRunner(
+    new ActionExecutor(toolRegistry),
+    new InMemoryMemoryStore()
+  );
+}
+
+function createContext(taskId: string): RuntimeContext {
+  return {
+    runtimeId: "runtime-1",
+    taskId,
+    agent: new AgentInstanceManager().getOrCreate("agent-1"),
+    memory: new InMemoryMemoryStore(),
+    modelProvider: new UnconfiguredModelProvider(),
+    state: new InMemoryRuntimeStateStore(),
+    now: new Date().toISOString()
+  };
+}
 
 describe("TaskRunner", () => {
-  it("wraps unexpected tool failures in EXECUTION_FAILED", async () => {
-    const toolRegistry = new ToolRegistry();
-    toolRegistry.register({
+  it("propagates a plain tool Error unchanged", async () => {
+    const original = new Error("boom");
+    const runner = createRunner({
       name: "explode",
       description: "Throws unexpectedly",
       execute() {
-        throw new Error("boom");
+        throw original;
       }
     });
 
-    const runner = new TaskRunner(
-      new ActionExecutor(toolRegistry),
-      new InMemoryMemoryStore()
-    );
-    const agent = new AgentInstanceManager().getOrCreate("agent-1");
-
-    await expect(
-      runner.run(
+    try {
+      await runner.run(
         {
           taskId: "task-5",
           agentId: "agent-1",
@@ -35,18 +54,43 @@ describe("TaskRunner", () => {
           input: "Trigger failure",
           payload: {}
         },
-        {
-          runtimeId: "runtime-1",
-          taskId: "task-5",
-          agent,
-          memory: new InMemoryMemoryStore(),
-          modelProvider: new UnconfiguredModelProvider(),
-          state: new InMemoryRuntimeStateStore(),
-          now: new Date().toISOString()
-        }
-      )
-    ).rejects.toMatchObject({
-      code: "EXECUTION_FAILED"
+        createContext("task-5")
+      );
+      expect.fail("should have thrown");
+    } catch (error) {
+      expect(error).toBe(original);
+      expect(error).toBeInstanceOf(Error);
+      expect(error).not.toBeInstanceOf(RuntimeError);
+      expect((error as Error).message).toBe("boom");
+    }
+  });
+
+  it("propagates a tool RuntimeError with its original code", async () => {
+    const original = new RuntimeError("TOOL_NOT_FOUND", "Tool missing");
+    const runner = createRunner({
+      name: "typed-fail",
+      description: "Throws a typed runtime error",
+      execute() {
+        throw original;
+      }
     });
+
+    try {
+      await runner.run(
+        {
+          taskId: "task-6",
+          agentId: "agent-1",
+          toolName: "typed-fail",
+          input: "Trigger typed failure",
+          payload: {}
+        },
+        createContext("task-6")
+      );
+      expect.fail("should have thrown");
+    } catch (error) {
+      expect(error).toBe(original);
+      expect(error).toBeInstanceOf(RuntimeError);
+      expect((error as RuntimeError).code).toBe("TOOL_NOT_FOUND");
+    }
   });
 });

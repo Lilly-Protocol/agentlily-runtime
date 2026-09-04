@@ -35,6 +35,37 @@ describe("TaskRunner memory append failure propagation", () => {
     }
   });
 
+  it("wraps a RuntimeError from memory append as EXECUTION_FAILED", async () => {
+    const throwingStore = {
+      append: async () => {
+        throw new RuntimeError("TOOL_NOT_FOUND", "store rejected append");
+      },
+      listByAgent: async () => []
+    };
+
+    const runner = new TaskRunner(stubExecutor as any, throwingStore as any);
+    const ctx = {} as any;
+
+    try {
+      await runner.run(
+        {
+          taskId: "t1-typed",
+          agentId: "a1",
+          toolName: "noop",
+          input: "go",
+          payload: {}
+        },
+        ctx
+      );
+      expect.fail("should have thrown");
+    } catch (e) {
+      const err = e as RuntimeError;
+      expect(err).toBeInstanceOf(RuntimeError);
+      expect(err.code).toBe("EXECUTION_FAILED");
+      expect(err.details?.cause).toContain("store rejected append");
+    }
+  });
+
   it("preserves original RuntimeError from executor without wrapping", async () => {
     const failingExecutor = {
       execute: async () => {
