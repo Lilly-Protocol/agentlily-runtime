@@ -48,4 +48,38 @@ describe("InMemoryRuntimeStateStore put/get round trips", () => {
     expect(await store.get<string>("b")).toBe("beta");
     expect(await store.get<string>("c")).toBe("gamma");
   });
+
+  it("lists keys in insertion order and removes deleted keys", async () => {
+    const store = new InMemoryRuntimeStateStore();
+    await store.put("first", 1);
+    await store.put("second", 2);
+
+    expect(await store.keys()).toEqual(["first", "second"]);
+    expect(await store.has("first")).toBe(true);
+    expect(await store.delete("first")).toBe(true);
+    expect(await store.keys()).toEqual(["second"]);
+  });
+
+  it("evicts the oldest key at capacity but not when replacing a key", async () => {
+    const store = new InMemoryRuntimeStateStore({ maxEntries: 2 });
+    await store.put("first", 1);
+    await store.put("second", 2);
+    await store.put("first", 10);
+
+    expect(await store.keys()).toEqual(["first", "second"]);
+
+    await store.put("third", 3);
+    expect(await store.keys()).toEqual(["second", "third"]);
+    expect(await store.get("first")).toBeUndefined();
+  });
+
+  it("supports an explicitly unbounded store and clear", async () => {
+    const store = new InMemoryRuntimeStateStore({ maxEntries: 0 });
+    await store.put("first", 1);
+    await store.put("second", 2);
+
+    expect(await store.size()).toBe(2);
+    await store.clear();
+    expect(await store.keys()).toEqual([]);
+  });
 });
