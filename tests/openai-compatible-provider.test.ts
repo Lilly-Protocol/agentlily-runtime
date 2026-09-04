@@ -152,6 +152,72 @@ describe("OpenAICompatibleModelProvider", () => {
     expect(response.outputText).toBe("Custom response");
   });
 
+  it("passes AbortSignal timeout when timeoutMs is configured", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          choices: [{ message: { content: "Timed response" } }]
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      )
+    );
+
+    const provider = new OpenAICompatibleModelProvider({
+      apiKey: "test-key",
+      timeoutMs: 5000
+    });
+
+    await provider.generate({
+      instructions: "Instructions",
+      input: "Input"
+    });
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const calledInit = fetchSpy.mock.calls[0][1] as RequestInit;
+    expect(calledInit.signal).toBeDefined();
+    expect(calledInit.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("resolves with empty outputText when choices array is empty or missing content", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          model: "gpt-4o-mini",
+          choices: []
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      )
+    );
+
+    const provider = new OpenAICompatibleModelProvider({
+      apiKey: "test-key"
+    });
+
+    const response1 = await provider.generate({
+      instructions: "test",
+      input: "test"
+    });
+    expect(response1.outputText).toBe("");
+    expect(response1.metadata.model).toBe("gpt-4o-mini");
+
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          model: "gpt-4o-mini",
+          choices: [{ message: {} }]
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      )
+    );
+
+    const response2 = await provider.generate({
+      instructions: "test",
+      input: "test"
+    });
+    expect(response2.outputText).toBe("");
+    expect(response2.metadata.model).toBe("gpt-4o-mini");
+  });
+
   it("handles non-2xx HTTP responses with descriptive error", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(JSON.stringify({ error: "Invalid API key" }), {
@@ -169,6 +235,23 @@ describe("OpenAICompatibleModelProvider", () => {
     ).rejects.toThrowError(
       'OpenAI-compatible provider returned HTTP 401: {"error":"Invalid API key"}'
     );
+  });
+
+  it("handles malformed non-JSON response body with descriptive error", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response("<html>Bad Gateway</html>", {
+        status: 200,
+        headers: { "Content-Type": "text/html" }
+      })
+    );
+
+    const provider = new OpenAICompatibleModelProvider({
+      apiKey: "valid-key"
+    });
+
+    await expect(
+      provider.generate({ instructions: "test", input: "test" })
+    ).rejects.toThrowError();
   });
 
   it("handles network failure gracefully", async () => {
