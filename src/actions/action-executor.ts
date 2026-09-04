@@ -15,12 +15,18 @@ export class ActionExecutor {
   private readonly logger: RuntimeLogger | undefined;
   private readonly eventBus: RuntimeEventBus | undefined;
   private readonly maxToolCallsPerTask: number | undefined;
+  private readonly maxTrackedTasks: number;
 
   public constructor(
     private readonly toolRegistry: ToolRegistry,
     maxToolCallsPerTaskOrLogger?: number | RuntimeLogger,
-    eventBus?: RuntimeEventBus
+    eventBus?: RuntimeEventBus,
+    maxTrackedTasks = 1_000
   ) {
+    if (!Number.isInteger(maxTrackedTasks) || maxTrackedTasks < 1) {
+      throw new RangeError("maxTrackedTasks must be a positive integer.");
+    }
+
     if (typeof maxToolCallsPerTaskOrLogger === "number") {
       this.maxToolCallsPerTask = maxToolCallsPerTaskOrLogger;
       this.logger = undefined;
@@ -28,10 +34,21 @@ export class ActionExecutor {
       this.logger = maxToolCallsPerTaskOrLogger;
     }
     this.eventBus = eventBus;
+    this.maxTrackedTasks = maxTrackedTasks;
   }
 
   public getToolCallCount(taskId: string): number {
     return this.toolCallCounts.get(taskId) ?? 0;
+  }
+
+  /** Clears the retained call budget for one completed task. */
+  public reset(taskId: string): void {
+    this.toolCallCounts.delete(taskId);
+  }
+
+  /** Clears all retained per-task call budgets. */
+  public resetAll(): void {
+    this.toolCallCounts.clear();
   }
 
   public async execute<TPayload, TResult>(
@@ -44,6 +61,15 @@ export class ActionExecutor {
       assertMaxToolCalls(currentCount, this.maxToolCallsPerTask);
     }
 
+    if (!this.toolCallCounts.has(context.taskId)) {
+      while (this.toolCallCounts.size >= this.maxTrackedTasks) {
+        const oldestTaskId = this.toolCallCounts.keys().next().value;
+        if (oldestTaskId === undefined) {
+          break;
+        }
+        this.toolCallCounts.delete(oldestTaskId);
+      }
+    }
     this.toolCallCounts.set(context.taskId, currentCount + 1);
 
     const tool = this.toolRegistry.get(toolName);
