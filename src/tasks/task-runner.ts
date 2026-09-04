@@ -26,17 +26,17 @@ export class TaskRunner {
     const startTime = performance.now();
     const startedAt = new Date().toISOString();
 
+    const output = await this.actionExecutor.execute<TPayload, TResult>(
+      task.toolName,
+      task.payload,
+      context
+    );
+
+    const endTime = performance.now();
+    const completedAt = new Date().toISOString();
+    const durationMs = Math.max(0, Math.round(endTime - startTime));
+
     try {
-      const output = await this.actionExecutor.execute<TPayload, TResult>(
-        task.toolName,
-        task.payload,
-        context
-      );
-
-      const endTime = performance.now();
-      const completedAt = new Date().toISOString();
-      const durationMs = Math.max(0, Math.round(endTime - startTime));
-
       await this.memoryStore.append({
         agentId: task.agentId,
         taskId: task.taskId,
@@ -44,20 +44,7 @@ export class TaskRunner {
         output,
         recordedAt: completedAt
       });
-
-      return {
-        taskId: task.taskId,
-        agentId: task.agentId,
-        toolName: task.toolName,
-        output,
-        startedAt,
-        completedAt,
-        durationMs
-      };
     } catch (error) {
-      // Typed runtime errors propagate unchanged; anything else thrown by a
-      // tool or the memory store is reported as an unexpected execution
-      // failure while preserving the original error message.
       if (error instanceof RuntimeError) {
         throw error;
       }
@@ -67,5 +54,15 @@ export class TaskRunner {
         error instanceof Error ? { cause: error.message } : undefined
       );
     }
+
+    return {
+      taskId: task.taskId,
+      agentId: task.agentId,
+      toolName: task.toolName,
+      output,
+      startedAt,
+      completedAt,
+      durationMs
+    };
   }
 }
