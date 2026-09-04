@@ -113,10 +113,13 @@ export class RuntimeEventBus {
     listener: RuntimeEventListener<TName>
   ): () => void {
     let unsubscribe: () => void = () => undefined;
-    const wrapped: RuntimeEventListener<TName> = (event) => {
+    const wrapped: RuntimeEventListener<TName> & { originalListener?: Listener } = (
+      event
+    ) => {
       unsubscribe();
       listener(event);
     };
+    wrapped.originalListener = listener as Listener;
     unsubscribe = this.on(eventName, wrapped);
     return unsubscribe;
   }
@@ -129,7 +132,20 @@ export class RuntimeEventBus {
     if (!listenerSet) {
       return false;
     }
-    return listenerSet.delete(listener as Listener);
+    const target = listener as Listener;
+    if (listenerSet.delete(target)) {
+      return true;
+    }
+    for (const item of listenerSet) {
+      if (
+        (item as unknown as { originalListener?: Listener }).originalListener ===
+        target
+      ) {
+        listenerSet.delete(item);
+        return true;
+      }
+    }
+    return false;
   }
 
   public listenerCount(eventName?: RuntimeEventName): number {
