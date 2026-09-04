@@ -16,7 +16,7 @@ export interface RuntimeEventMap {
     taskId: string;
     agentId: string;
     toolName: string;
-    durationMs?: number;
+    durationMs: number;
   };
   "runtime.task.failed": {
     runtimeId: string;
