@@ -110,7 +110,90 @@ console.log(result.output);
 - `npm run test` runs Vitest with coverage
 - `npm run verify` runs formatting, linting, typecheck, and tests
 
-## Contributor Guidance
+## Runtime Events
+
+`agentlily-runtime` features an event-driven lifecycle managed by `RuntimeEventBus`. You can subscribe to events to build observers, audit loggers, metrics collectors, or tracing adapters.
+
+### Event Catalog
+
+The following table lists all events defined in `RuntimeEventMap`:
+
+| Event Name               | Description                                                          | Key Payload Fields                                         |
+| :----------------------- | :------------------------------------------------------------------- | :--------------------------------------------------------- |
+| `runtime.started`        | Emitted when `AgentRuntime.start()` successfully completes           | `runtimeId`, `occurredAt`                                  |
+| `runtime.stopped`        | Emitted when `AgentRuntime.stop()` finishes execution                | `runtimeId`, `occurredAt`                                  |
+| `runtime.task.received`  | Emitted before task execution begins                                 | `runtimeId`, `taskId`, `agentId`                           |
+| `runtime.task.completed` | Emitted when a task finishes execution successfully                  | `runtimeId`, `taskId`, `agentId`, `toolName`, `durationMs` |
+| `runtime.task.failed`    | Emitted when a task fails during execution                           | `runtimeId`, `taskId`, `agentId`, `reason`                 |
+| `runtime.tool.invoked`   | Emitted immediately before a tool is executed                        | `runtimeId`, `taskId`, `agentId`, `toolName`, `invokedAt`  |
+| `runtime.internal.error` | Emitted when a listener throws or an unhandled internal fault occurs | `eventName`, `errorMessage`, `occurredAt`                  |
+
+### Subscription Patterns
+
+You can inject a custom `RuntimeEventBus` into `AgentRuntime` or use `bus.on()` and `bus.once()` to listen for lifecycle events:
+
+```ts
+import {
+  AgentRuntime,
+  RuntimeEventBus
+} from "@lily-protocol/agentlily-runtime";
+
+const eventBus = new RuntimeEventBus();
+
+// Subscribe to task completion
+const unsubscribeCompleted = eventBus.on("runtime.task.completed", (event) => {
+  console.log(
+    `Task ${event.payload.taskId} completed in ${event.payload.durationMs}ms`
+  );
+});
+
+// Subscribe to task failures
+const unsubscribeFailed = eventBus.on("runtime.task.failed", (event) => {
+  console.error(`Task ${event.payload.taskId} failed: ${event.payload.reason}`);
+});
+
+const runtime = new AgentRuntime({
+  runtimeId: "monitored-runtime",
+  eventBus
+});
+
+await runtime.start();
+
+// Later, unsubscribe when no longer needed:
+unsubscribeCompleted();
+unsubscribeFailed();
+```
+
+## Durable Memory via JsonFileMemoryStore
+
+For persistent task history across runtime restarts, configure `memoryStoragePath` in `RuntimeOptions`. When supplied, `AgentRuntime` initializes a `JsonFileMemoryStore` backing instance instead of the default ephemeral `InMemoryMemoryStore`.
+
+```ts
+import { AgentRuntime } from "@lily-protocol/agentlily-runtime";
+
+const runtime = new AgentRuntime({
+  runtimeId: "persistent-runtime",
+  memoryStoragePath: "./data/task-history.json"
+});
+```
+
+### Persisted Entry Schema
+
+Each entry appended to the storage file satisfies the `MemoryEntry` interface:
+
+| Field        | Type      | Description                                      |
+| :----------- | :-------- | :----------------------------------------------- |
+| `agentId`    | `string`  | ID of the agent associated with the task         |
+| `taskId`     | `string`  | Unique identifier of the task                    |
+| `input`      | `string`  | Input prompt or command given to the task        |
+| `output`     | `unknown` | Tool execution output or result                  |
+| `recordedAt` | `string`  | ISO 8601 timestamp of when the entry was written |
+
+### Durability & Concurrency Caveats
+
+- **File Rewrites:** `JsonFileMemoryStore` reads and rewrites the entire JSON array on each append (`flush()`), making it suitable for development, testing, or low-throughput scenarios rather than high-frequency production pipelines.
+- **No Inherent Capacity Limit:** Unlike `InMemoryMemoryStore`, `JsonFileMemoryStore` currently does not enforce global FIFO eviction or per-agent capacity limits; entries grow monotonically unless cleared manually via `clear()`.
+- **Multi-Process Concurrency:** Concurrent writes across multiple Node.js processes targeting the same file path without external file locking may cause race conditions or lost updates.
 
 Good first contributions should add depth without collapsing extension points.
 Examples:
