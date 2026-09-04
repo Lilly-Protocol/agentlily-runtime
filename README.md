@@ -64,6 +64,13 @@ src/
 tests/         Foundation and happy-path tests
 ```
 
+## Requirements & Supported Node.js Versions
+
+`agentlily-runtime` declares `"engines": { "node": ">=20" }`. The CI workflow actively verifies formatting, linting, typechecking, and the full test suite across a matrix of supported Node.js LTS lines:
+
+- **Node.js 20** (Declared baseline LTS floor)
+- **Node.js 22** (Active LTS)
+
 ## Quick Start
 
 ```bash
