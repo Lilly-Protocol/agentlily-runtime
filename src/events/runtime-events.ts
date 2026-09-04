@@ -47,13 +47,27 @@ export type RuntimeEventListener<TName extends RuntimeEventName> = (
 ) => void;
 
 export interface RuntimeEventBusOptions {
-  /** Maximum listener registrations allowed per event name before warning. Defaults to 100. */
+  /** Maximum listener registrations allowed per event name. Defaults to 100. */
   maxListeners?: number;
   /** Optional handler invoked whenever a listener throws or rejects. */
   onListenerError?: (error: unknown) => void;
 }
 
 export const DEFAULT_MAX_LISTENERS = 100;
+
+export class RuntimeEventListenerLimitError extends Error {
+  public readonly eventName: RuntimeEventName;
+  public readonly maxListeners: number;
+
+  public constructor(eventName: RuntimeEventName, maxListeners: number) {
+    super(
+      `Cannot add listener for "${eventName}": max listener count (${maxListeners}) exceeded.`
+    );
+    this.name = "RuntimeEventListenerLimitError";
+    this.eventName = eventName;
+    this.maxListeners = maxListeners;
+  }
+}
 
 type Listener = RuntimeEventListener<RuntimeEventName>;
 
@@ -96,9 +110,7 @@ export class RuntimeEventBus {
     }
 
     if (listenerSet.size >= this.maxListeners) {
-      console.warn(
-        `[RuntimeEventBus] Possible memory leak: max listener count (${this.maxListeners}) exceeded for event "${eventName}".`
-      );
+      throw new RuntimeEventListenerLimitError(eventName, this.maxListeners);
     }
 
     listenerSet.add(stored);

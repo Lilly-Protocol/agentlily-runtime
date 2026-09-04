@@ -11,7 +11,10 @@ export {
 } from "./agents/agent-instance-manager.js";
 export { ActionExecutor } from "./actions/action-executor.js";
 export { RuntimeError } from "./errors/runtime-errors.js";
-export { RuntimeEventBus } from "./events/runtime-events.js";
+export {
+  RuntimeEventBus,
+  RuntimeEventListenerLimitError
+} from "./events/runtime-events.js";
 export {
   assertMaxToolCalls,
   assertNonEmptyValue,
