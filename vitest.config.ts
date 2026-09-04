@@ -9,9 +9,7 @@ export default defineConfig({
       exclude: [
         "src/**/types.ts",
         "src/runtime/context.ts",
-        "src/tasks/task-types.ts",
-        "src/providers/model-provider.ts",
-        "src/state/runtime-state.ts"
+        "src/tasks/task-types.ts"
       ],
       thresholds: {
         lines: 85,
