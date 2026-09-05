@@ -1,4 +1,5 @@
 import { RuntimeError } from "../errors/runtime-errors.js";
+import { assertNonEmptyValue } from "../guards/runtime-guards.js";
 import type { RuntimeEventBus } from "../events/runtime-events.js";
 import { assertRuntimeStarted } from "../guards/runtime-guards.js";
 import type { RuntimeTask, TaskExecutionResult } from "../tasks/task-types.js";
@@ -119,6 +120,11 @@ export class AgentRuntime {
       state: this.dependencies.stateStore,
       now: new Date().toISOString()
     };
+
+    assertNonEmptyValue(task.taskId, "taskId");
+    assertNonEmptyValue(task.agentId, "agentId");
+    assertNonEmptyValue(task.toolName, "toolName");
+    assertNonEmptyValue(task.input, "input");
 
     this.dependencies.eventBus.emit({
       name: "runtime.task.received",

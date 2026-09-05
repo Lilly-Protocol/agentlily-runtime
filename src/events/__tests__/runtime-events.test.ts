@@ -40,3 +40,50 @@ describe("RuntimeEventBus max listeners", () => {
     warnSpy.mockRestore();
   });
 });
+
+describe("RuntimeEventBus once() async rejection", () => {
+  it("catches rejections from async once listeners via onListenerError", async () => {
+    const errorSpy = vi.fn();
+    const bus = new RuntimeEventBus({ onListenerError: errorSpy });
+
+    bus.once("runtime.started", async () => {
+      throw new Error("async once failure");
+    });
+
+    bus.emit({
+      name: "runtime.started",
+      payload: { runtimeId: "r1", occurredAt: "2026-01-01T00:00:00Z" }
+    });
+
+    // Wait for the promise to reject and be caught
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+    expect(errorSpy.mock.calls[0]![0]).toBeInstanceOf(Error);
+    expect((errorSpy.mock.calls[0]![0] as Error).message).toBe(
+      "async once failure"
+    );
+  });
+
+  it("removes once listener after async callback completes", async () => {
+    const bus = new RuntimeEventBus();
+    let callCount = 0;
+
+    bus.once("runtime.started", async () => {
+      callCount++;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+
+    bus.emit({
+      name: "runtime.started",
+      payload: { runtimeId: "r1", occurredAt: "2026-01-01T00:00:00Z" }
+    });
+    bus.emit({
+      name: "runtime.started",
+      payload: { runtimeId: "r1", occurredAt: "2026-01-01T00:00:00Z" }
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(callCount).toBe(1);
+  });
+});
