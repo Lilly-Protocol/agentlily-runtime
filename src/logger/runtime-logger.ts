@@ -48,40 +48,58 @@ function redactValue(value: unknown, redactKeys: RegExp): unknown {
 }
 
 export class ConsoleRuntimeLogger implements RuntimeLogger {
-  private readonly minimumLevel: RuntimeLogLevel;
+  public readonly level: RuntimeLogLevel;
   private readonly redactKeys: RegExp;
 
   public constructor(options: ConsoleRuntimeLoggerOptions = {}) {
-    this.minimumLevel = options.level ?? "info";
+    this.level = options.level ?? "info";
     this.redactKeys = options.redactKeys ?? DEFAULT_REDACT_KEYS;
   }
 
   public info(message: string, metadata?: Record<string, unknown>): void {
-    if (this.shouldLog("info")) {
-      console.info(message, this.prepareMetadata(metadata));
-    }
+    this.emit("info", message, metadata);
   }
 
   public warn(message: string, metadata?: Record<string, unknown>): void {
-    if (this.shouldLog("warn")) {
-      console.warn(message, this.prepareMetadata(metadata));
-    }
+    this.emit("warn", message, metadata);
   }
 
   public debug(message: string, metadata?: Record<string, unknown>): void {
-    if (this.shouldLog("debug")) {
-      console.debug(message, this.prepareMetadata(metadata));
-    }
+    this.emit("debug", message, metadata);
   }
 
   public error(message: string, metadata?: Record<string, unknown>): void {
-    if (this.shouldLog("error")) {
-      console.error(message, this.prepareMetadata(metadata));
+    this.emit("error", message, metadata);
+  }
+
+  private emit(
+    level: RuntimeLogLevel,
+    message: string,
+    metadata?: Record<string, unknown>
+  ): void {
+    if (!this.shouldLog(level)) {
+      return;
+    }
+
+    const prepared = this.prepareMetadata(metadata);
+    switch (level) {
+      case "debug":
+        console.debug(message, prepared);
+        break;
+      case "info":
+        console.info(message, prepared);
+        break;
+      case "warn":
+        console.warn(message, prepared);
+        break;
+      case "error":
+        console.error(message, prepared);
+        break;
     }
   }
 
   private shouldLog(level: RuntimeLogLevel): boolean {
-    return LOG_LEVEL_PRIORITY[level] >= LOG_LEVEL_PRIORITY[this.minimumLevel];
+    return LOG_LEVEL_PRIORITY[level] >= LOG_LEVEL_PRIORITY[this.level];
   }
 
   private prepareMetadata(
