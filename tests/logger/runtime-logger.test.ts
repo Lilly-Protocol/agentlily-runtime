@@ -50,6 +50,31 @@ describe("InMemoryRuntimeLogger", () => {
       "info"
     ]);
   });
+
+  it("filters entries below the configured minimum level", () => {
+    const logger = new InMemoryRuntimeLogger({ level: "warn" });
+    logger.debug("should be ignored");
+    logger.info("should be ignored");
+    logger.warn("warn message");
+    logger.error("error message");
+    expect(logger.size()).toBe(2);
+    expect(logger.entries.map((e) => e.level)).toEqual(["warn", "error"]);
+  });
+
+  it("records all levels by default", () => {
+    const logger = new InMemoryRuntimeLogger();
+    logger.debug("debug");
+    logger.info("info");
+    logger.warn("warn");
+    logger.error("error");
+    expect(logger.size()).toBe(4);
+    expect(logger.entries.map((e) => e.level)).toEqual([
+      "debug",
+      "info",
+      "warn",
+      "error"
+    ]);
+  });
 });
 
 describe("ConsoleRuntimeLogger", () => {
