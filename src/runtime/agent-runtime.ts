@@ -82,7 +82,21 @@ export class AgentRuntime {
     this.started = false;
 
     if (options.drainTimeoutMs !== undefined && options.drainTimeoutMs > 0) {
+      const drainStartTime = Date.now();
       await this.drainInFlightTasks(options.drainTimeoutMs);
+      if (this.inFlightTasks.size > 0) {
+        const elapsedDrainMs = Date.now() - drainStartTime;
+        const strandedIds = Array.from(this.inFlightTasks);
+        this.dependencies.logger.warn(
+          `Tasks still in flight after drain timeout: ${strandedIds.join(", ")}`,
+          {
+            runtimeId: this.runtimeId,
+            elapsedDrainMs,
+            strandedTasks: strandedIds,
+            inFlightTasks: strandedIds
+          }
+        );
+      }
     }
 
     if (options.clearListeners === true) {
