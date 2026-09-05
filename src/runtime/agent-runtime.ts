@@ -85,6 +85,30 @@ export class AgentRuntime {
       await this.drainInFlightTasks(options.drainTimeoutMs);
     }
 
+    // After draining, if there are still in-flight tasks, warn
+    if (this.inFlightTasks.size > 0) {
+      const stranded = Array.from(this.inFlightTasks);
+      this.dependencies.logger.warn(
+        `AgentRuntime.stop() timed out after ${options.drainTimeoutMs}ms with ${stranded.length} task(s) still in flight: ${stranded.join(", ")}`,
+        {
+          runtimeId: this.runtimeId,
+          strandedTaskIds: stranded,
+          drainTimeoutMs: options.drainTimeoutMs,
+          elapsedMs: options.drainTimeoutMs
+        }
+      );
+      // Optionally add to stopped event
+      this.dependencies.eventBus.emit({
+        name: "runtime.stopped",
+        payload: {
+          runtimeId: this.runtimeId,
+          occurredAt: new Date().toISOString(),
+          strandedTaskIds: stranded,
+          drainTimeoutMs: options.drainTimeoutMs
+        }
+      });
+    }
+
     if (options.clearListeners === true) {
       const eventBus = this.dependencies.eventBus as RuntimeEventBus & {
         clear?: () => void;
@@ -108,7 +132,6 @@ export class AgentRuntime {
     task: RuntimeTask<TPayload>
   ): Promise<TaskExecutionResult<TResult>> {
     assertRuntimeStarted(this.started);
-
     const agent = this.dependencies.agentManager.getOrCreate(task.agentId);
     const context: RuntimeContext = {
       runtimeId: this.runtimeId,
@@ -141,14 +164,12 @@ export class AgentRuntime {
         task,
         context
       );
-
       this.dependencies.logger.info("Runtime task completed.", {
         runtimeId: this.runtimeId,
         taskId: task.taskId,
         toolName: task.toolName,
         durationMs: result.durationMs
       });
-
       this.dependencies.eventBus.emit({
         name: "runtime.task.completed",
         payload: {
@@ -159,27 +180,24 @@ export class AgentRuntime {
           durationMs: result.durationMs
         }
       });
-
       return result;
     } catch (error) {
-      const reason =
-        error instanceof Error ? error.message : "Unknown runtime failure.";
-
       this.dependencies.logger.error("Runtime task failed.", {
         runtimeId: this.runtimeId,
         taskId: task.taskId,
-        reason
+        toolName: task.toolName,
+        error
       });
       this.dependencies.eventBus.emit({
-        name: "runtime.task.failed",
+        name: "runtime.task.error",
         payload: {
           runtimeId: this.runtimeId,
           taskId: task.taskId,
           agentId: task.agentId,
-          reason
+          toolName: task.toolName,
+          error
         }
       });
-
       throw error;
     } finally {
       this.inFlightTasks.delete(task.taskId);
