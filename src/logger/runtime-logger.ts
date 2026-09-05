@@ -95,7 +95,15 @@ export class ConsoleRuntimeLogger implements RuntimeLogger {
 }
 
 export interface InMemoryRuntimeLoggerOptions {
+  /**
+   * Maximum number of log entries to retain in memory. Defaults to 5,000.
+   */
   maxEntries?: number;
+  /**
+   * Minimum log level to record. When specified, calls below this severity level are discarded.
+   * If omitted, all log levels (debug, info, warn, error) are retained.
+   */
+  level?: RuntimeLogLevel;
 }
 
 interface InMemoryLogEntry {
@@ -107,25 +115,35 @@ interface InMemoryLogEntry {
 export class InMemoryRuntimeLogger implements RuntimeLogger {
   public readonly entries: InMemoryLogEntry[] = [];
   private readonly maxEntries: number;
+  public readonly level?: RuntimeLogLevel;
 
   public constructor(options: InMemoryRuntimeLoggerOptions = {}) {
     this.maxEntries = options.maxEntries ?? 5_000;
+    this.level = options.level;
   }
 
   public info(message: string, metadata?: Record<string, unknown>): void {
-    this.appendEntry("info", message, metadata);
+    if (this.shouldLog("info")) {
+      this.appendEntry("info", message, metadata);
+    }
   }
 
   public warn(message: string, metadata?: Record<string, unknown>): void {
-    this.appendEntry("warn", message, metadata);
+    if (this.shouldLog("warn")) {
+      this.appendEntry("warn", message, metadata);
+    }
   }
 
   public debug(message: string, metadata?: Record<string, unknown>): void {
-    this.appendEntry("debug", message, metadata);
+    if (this.shouldLog("debug")) {
+      this.appendEntry("debug", message, metadata);
+    }
   }
 
   public error(message: string, metadata?: Record<string, unknown>): void {
-    this.appendEntry("error", message, metadata);
+    if (this.shouldLog("error")) {
+      this.appendEntry("error", message, metadata);
+    }
   }
 
   public clear(): void {
@@ -134,6 +152,11 @@ export class InMemoryRuntimeLogger implements RuntimeLogger {
 
   public size(): number {
     return this.entries.length;
+  }
+
+  private shouldLog(level: RuntimeLogLevel): boolean {
+    if (!this.level) return true;
+    return LOG_LEVEL_PRIORITY[level] >= LOG_LEVEL_PRIORITY[this.level];
   }
 
   private appendEntry(
