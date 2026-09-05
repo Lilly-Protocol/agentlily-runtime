@@ -7,6 +7,7 @@ export type { RuntimeStopOptions } from "./runtime/agent-runtime.js";
 
 export {
   AgentInstanceManager,
+  DEFAULT_MAX_AGENT_INSTANCES,
   type AgentInstanceManagerOptions
 } from "./agents/agent-instance-manager.js";
 export { ActionExecutor } from "./actions/action-executor.js";
