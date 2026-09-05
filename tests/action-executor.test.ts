@@ -1,9 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   ActionExecutor,
   AgentInstanceManager,
   InMemoryMemoryStore,
   InMemoryRuntimeStateStore,
+  RuntimeError,
+  RuntimeEventBus,
   ToolRegistry,
   UnconfiguredModelProvider
 } from "../src/index.js";
@@ -71,6 +73,97 @@ describe("ActionExecutor", () => {
         maxToolCalls: 2
       }
     });
+  });
+
+  it.each([undefined, 1])(
+    "does not charge or emit for unresolved tools with limit %s",
+    async (limit) => {
+      const registry = new ToolRegistry();
+      const events = new RuntimeEventBus();
+      const onInvoked = vi.fn();
+      events.on("runtime.tool.invoked", onInvoked);
+      const executor = new ActionExecutor(registry, limit, events);
+      const ctx = createMockContext("task-lookup");
+
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const failed = executor.execute("missing", {}, ctx);
+        await expect(failed).rejects.toBeInstanceOf(RuntimeError);
+        await expect(failed).rejects.toMatchObject({
+          code: "TOOL_NOT_FOUND",
+          details: { toolName: "missing" }
+        });
+        expect(executor.getToolCallCount(ctx.taskId)).toBe(0);
+      }
+      expect(onInvoked).not.toHaveBeenCalled();
+
+      registry.register({
+        name: "ping",
+        description: "Ping",
+        execute: () => "pong"
+      });
+      await expect(executor.execute("ping", {}, ctx)).resolves.toBe("pong");
+      expect(executor.getToolCallCount(ctx.taskId)).toBe(1);
+      expect(onInvoked).toHaveBeenCalledOnce();
+    }
+  );
+
+  it("reserves the last slot before awaiting an in-flight tool", async () => {
+    let finish!: (result: string) => void;
+    const result = new Promise<string>((resolve) => {
+      finish = resolve;
+    });
+    const execute = vi.fn(() => result);
+    const registry = new ToolRegistry();
+    registry.register({ name: "slow", description: "Deferred tool", execute });
+    const executor = new ActionExecutor(registry, 1);
+    const ctx = createMockContext("task-in-flight");
+
+    const first = executor.execute("slow", {}, ctx);
+    try {
+      expect(executor.getToolCallCount(ctx.taskId)).toBe(1);
+      await expect(executor.execute("slow", {}, ctx)).rejects.toMatchObject({
+        code: "MAX_TOOL_CALLS_EXCEEDED"
+      });
+      expect(execute).toHaveBeenCalledOnce();
+    } finally {
+      finish("done");
+      await expect(first).resolves.toBe("done");
+    }
+  });
+
+  it.each([false, true])(
+    "charges resolved tools that fail (async=%s)",
+    async (asyncFailure) => {
+      const failure = new Error("tool failed");
+      const execute = vi.fn(() => {
+        if (asyncFailure) return Promise.reject(failure);
+        throw failure;
+      });
+      const registry = new ToolRegistry();
+      registry.register({ name: "failing", description: "Fails", execute });
+      const executor = new ActionExecutor(registry, 1);
+      const ctx = createMockContext("task-failed-tool");
+
+      await expect(executor.execute("failing", {}, ctx)).rejects.toBe(failure);
+      expect(executor.getToolCallCount(ctx.taskId)).toBe(1);
+      await expect(executor.execute("failing", {}, ctx)).rejects.toMatchObject({
+        code: "MAX_TOOL_CALLS_EXCEEDED"
+      });
+      expect(execute).toHaveBeenCalledOnce();
+    }
+  );
+
+  it("preserves the exhausted-budget guard before lookup", async () => {
+    const registry = new ToolRegistry();
+    const get = vi.spyOn(registry, "get");
+    const executor = new ActionExecutor(registry, 0);
+    await expect(
+      executor.execute("missing", {}, createMockContext("task-zero"))
+    ).rejects.toMatchObject({
+      code: "MAX_TOOL_CALLS_EXCEEDED"
+    });
+    expect(get).not.toHaveBeenCalled();
+    expect(executor.getToolCallCount("task-zero")).toBe(0);
   });
 
   it("isolates call limits per task ID", async () => {
