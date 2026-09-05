@@ -44,7 +44,7 @@ export interface RuntimeEvent<
 
 export type RuntimeEventListener<TName extends RuntimeEventName> = (
   event: RuntimeEvent<TName>
-) => void;
+) => unknown;
 
 export interface RuntimeEventBusOptions {
   /** Maximum listener registrations allowed per event name before warning. Defaults to 100. */
@@ -115,7 +115,7 @@ export class RuntimeEventBus {
     let unsubscribe: () => void = () => undefined;
     const wrapped: RuntimeEventListener<TName> = (event) => {
       unsubscribe();
-      listener(event);
+      return listener(event);
     };
     unsubscribe = this.on(eventName, wrapped);
     return unsubscribe;
