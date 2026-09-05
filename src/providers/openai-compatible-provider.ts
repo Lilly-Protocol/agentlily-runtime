@@ -109,13 +109,24 @@ export class OpenAICompatibleModelProvider implements ModelProvider {
       model?: string;
     };
 
-    const outputText = data.choices?.[0]?.message?.content ?? "";
+    if (!Array.isArray(data.choices) || data.choices.length === 0) {
+      throw new Error(
+        `OpenAI-compatible provider returned empty choices (HTTP ${response.status})`
+      );
+    }
+    const firstChoice = data.choices[0];
+    if (!firstChoice?.message?.content) {
+      throw new Error(
+        `OpenAI-compatible provider returned a choice without message content (HTTP ${response.status})`
+      );
+    }
+    const outputText = firstChoice.message.content;
     const metadata: Record<string, unknown> = {
       model: data.model ?? this.model
     };
 
-    if (data.choices?.[0]?.finish_reason !== undefined) {
-      metadata.finishReason = data.choices[0].finish_reason;
+    if (firstChoice.finish_reason !== undefined) {
+      metadata.finishReason = firstChoice.finish_reason;
     }
     if (data.usage !== undefined) {
       metadata.usage = data.usage;
