@@ -95,7 +95,10 @@ export class ConsoleRuntimeLogger implements RuntimeLogger {
 }
 
 export interface InMemoryRuntimeLoggerOptions {
+  /** Maximum number of log entries to retain in memory. Defaults to 5,000. */
   maxEntries?: number;
+  /** Minimum log level to record. Entries below this severity are discarded. Defaults to "debug". */
+  level?: RuntimeLogLevel;
 }
 
 interface InMemoryLogEntry {
@@ -107,9 +110,15 @@ interface InMemoryLogEntry {
 export class InMemoryRuntimeLogger implements RuntimeLogger {
   public readonly entries: InMemoryLogEntry[] = [];
   private readonly maxEntries: number;
+  private readonly minimumLevel: RuntimeLogLevel;
 
   public constructor(options: InMemoryRuntimeLoggerOptions = {}) {
     this.maxEntries = options.maxEntries ?? 5_000;
+    this.minimumLevel = options.level ?? "debug";
+  }
+
+  public get level(): RuntimeLogLevel {
+    return this.minimumLevel;
   }
 
   public info(message: string, metadata?: Record<string, unknown>): void {
@@ -136,11 +145,18 @@ export class InMemoryRuntimeLogger implements RuntimeLogger {
     return this.entries.length;
   }
 
+  private shouldLog(level: RuntimeLogLevel): boolean {
+    return LOG_LEVEL_PRIORITY[level] >= LOG_LEVEL_PRIORITY[this.minimumLevel];
+  }
+
   private appendEntry(
     level: RuntimeLogLevel,
     message: string,
     metadata?: Record<string, unknown>
   ): void {
+    if (!this.shouldLog(level)) {
+      return;
+    }
     if (this.maxEntries > 0 && this.entries.length >= this.maxEntries) {
       this.entries.shift();
     }
