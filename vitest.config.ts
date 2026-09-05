@@ -7,6 +7,7 @@ export default defineConfig({
       reporter: ["text", "html"],
       include: ["src/**/*.ts"],
       exclude: [
+        "src/**/__tests__/**",
         "src/**/types.ts",
         "src/runtime/context.ts",
         "src/tasks/task-types.ts",
