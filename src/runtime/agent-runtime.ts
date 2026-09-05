@@ -16,6 +16,7 @@ export class AgentRuntime {
   private readonly dependencies: ReturnType<typeof createRuntimeDependencies>;
   private readonly runtimeId: string;
   private readonly inFlightTasks = new Set<string>();
+  private readonly inFlightPromises = new Set<Promise<unknown>>();
   private started = false;
   private stopped = false;
 
@@ -83,6 +84,13 @@ export class AgentRuntime {
 
     if (options.drainTimeoutMs !== undefined && options.drainTimeoutMs > 0) {
       await this.drainInFlightTasks(options.drainTimeoutMs);
+      if (this.inFlightTasks.size > 0) {
+        this.dependencies.logger.warn("Tasks still in flight after drain timeout.", {
+          runtimeId: this.runtimeId,
+          inFlightTaskCount: this.inFlightTasks.size,
+          inFlightTasks: Array.from(this.inFlightTasks)
+        });
+      }
     }
 
     if (options.clearListeners === true) {
@@ -136,6 +144,11 @@ export class AgentRuntime {
     });
 
     this.inFlightTasks.add(task.taskId);
+    let resolveTaskPromise!: () => void;
+    const taskPromise = new Promise<void>((resolve) => {
+      resolveTaskPromise = resolve;
+    });
+    this.inFlightPromises.add(taskPromise);
     try {
       const result = await this.dependencies.taskRunner.run<TPayload, TResult>(
         task,
@@ -183,21 +196,28 @@ export class AgentRuntime {
       throw error;
     } finally {
       this.inFlightTasks.delete(task.taskId);
+      this.inFlightPromises.delete(taskPromise);
+      resolveTaskPromise();
     }
   }
 
   private async drainInFlightTasks(timeoutMs: number): Promise<void> {
-    const deadline = Date.now() + timeoutMs;
-    while (this.inFlightTasks.size > 0) {
-      const remaining = deadline - Date.now();
-      if (remaining <= 0) {
-        break;
-      }
-      await this.sleep(Math.min(5, remaining));
+    if (this.inFlightPromises.size === 0) {
+      return;
     }
-  }
 
-  private sleep(milliseconds: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, milliseconds));
+    const allInFlight = Promise.allSettled(Array.from(this.inFlightPromises));
+    let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
+    const timeoutPromise = new Promise<void>((resolve) => {
+      timeoutTimer = setTimeout(resolve, timeoutMs);
+    });
+
+    try {
+      await Promise.race([allInFlight, timeoutPromise]);
+    } finally {
+      if (timeoutTimer !== undefined) {
+        clearTimeout(timeoutTimer);
+      }
+    }
   }
 }
