@@ -44,9 +44,9 @@ export class ActionExecutor {
       assertMaxToolCalls(currentCount, this.maxToolCallsPerTask);
     }
 
+    const tool = this.toolRegistry.get(toolName);
     this.toolCallCounts.set(context.taskId, currentCount + 1);
 
-    const tool = this.toolRegistry.get(toolName);
     const startedAt = Date.now();
 
     this.eventBus?.emit({
