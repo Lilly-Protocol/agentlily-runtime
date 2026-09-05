@@ -80,6 +80,35 @@ describe("ActionExecutor tool dispatch and payload passthrough (Issue #115)", ()
     ).rejects.toThrow(/not registered/);
   });
 
+  it("does not increment tool call count when tool is not found (Issue #256)", async () => {
+    const registry = new ToolRegistry();
+    registry.register({
+      name: "valid-tool",
+      description: "A valid tool",
+      execute: () => ({ success: true })
+    });
+
+    const executor = new ActionExecutor(registry, 1);
+    const mockContext = { runtimeId: "r1", taskId: "task-quota-1" } as any;
+
+    expect(executor.getToolCallCount("task-quota-1")).toBe(0);
+
+    // Call unknown tool -> should fail with TOOL_NOT_FOUND and not consume budget
+    await expect(
+      executor.execute("missing-tool", {}, mockContext)
+    ).rejects.toMatchObject({
+      name: "RuntimeError",
+      code: "TOOL_NOT_FOUND"
+    });
+
+    expect(executor.getToolCallCount("task-quota-1")).toBe(0);
+
+    // Subsequent valid call with maxToolCallsPerTask: 1 should still succeed
+    const result = await executor.execute("valid-tool", {}, mockContext);
+    expect(result).toEqual({ success: true });
+    expect(executor.getToolCallCount("task-quota-1")).toBe(1);
+  });
+
   it("returns async tool results correctly", async () => {
     const registry = new ToolRegistry();
     registry.register({
