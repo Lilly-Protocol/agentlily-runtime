@@ -109,6 +109,19 @@ export class AgentRuntime {
   ): Promise<TaskExecutionResult<TResult>> {
     assertRuntimeStarted(this.started);
 
+    if (!task || typeof task !== "object") {
+      throw new RuntimeError("INVALID_TASK", "Task must be an object.");
+    }
+    if (!task.taskId || typeof task.taskId !== "string" || task.taskId.trim().length === 0) {
+      throw new RuntimeError("INVALID_TASK", "Task must contain a valid non-empty taskId.");
+    }
+    if (!task.agentId || typeof task.agentId !== "string" || task.agentId.trim().length === 0) {
+      throw new RuntimeError("INVALID_TASK", "Task must contain a valid non-empty agentId.");
+    }
+    if (!task.toolName || typeof task.toolName !== "string" || task.toolName.trim().length === 0) {
+      throw new RuntimeError("INVALID_TASK", "Task must contain a valid non-empty toolName.");
+    }
+
     const agent = this.dependencies.agentManager.getOrCreate(task.agentId);
     const context: RuntimeContext = {
       runtimeId: this.runtimeId,
