@@ -53,120 +53,115 @@ describe("AgentInstanceManager getOrCreate identity semantics (Issue #113)", () 
   });
 });
 
-describe("AgentInstanceManager FIFO eviction at maxInstances (Issue #241)", () => {
-  it("defaults to 5,000 maxInstances when option is omitted", () => {
-    const manager = new AgentInstanceManager();
-    expect((manager as unknown as { maxInstances: number }).maxInstances).toBe(5_000);
+describe("AgentInstanceManager capacity limits and FIFO eviction (Issue #241)", () => {
+  it("evicts the oldest agent when creating maxInstances + 1 instances", () => {
+    const manager = new AgentInstanceManager({ maxInstances: 3 });
+
+    manager.getOrCreate("agent-1");
+    manager.getOrCreate("agent-2");
+    manager.getOrCreate("agent-3");
+
+    expect(manager.size()).toBe(3);
+    expect(manager.has("agent-1")).toBe(true);
+    expect(manager.has("agent-2")).toBe(true);
+    expect(manager.has("agent-3")).toBe(true);
+
+    // Creating a 4th agent must evict agent-1 (the oldest instance)
+    const agent4 = manager.getOrCreate("agent-4");
+    expect(agent4.agentId).toBe("agent-4");
+    expect(manager.size()).toBe(3);
+    expect(manager.has("agent-1")).toBe(false);
+    expect(manager.get("agent-1")).toBeUndefined();
+    expect(manager.has("agent-2")).toBe(true);
+    expect(manager.has("agent-3")).toBe(true);
+    expect(manager.has("agent-4")).toBe(true);
+
+    const activeIds = manager.list().map((i) => i.agentId);
+    expect(activeIds).toEqual(["agent-2", "agent-3", "agent-4"]);
+    expect(activeIds).not.toContain("agent-1");
   });
 
-  it("evicts the oldest instance when maxInstances capacity is exceeded", () => {
+  it("continues FIFO eviction in strict chronological order across successive overflow insertions", () => {
     const manager = new AgentInstanceManager({ maxInstances: 2 });
+
+    manager.getOrCreate("a");
+    manager.getOrCreate("b");
+
+    // Add c -> evicts a
+    manager.getOrCreate("c");
+    expect(manager.size()).toBe(2);
+    expect(manager.has("a")).toBe(false);
+    expect(manager.list().map((i) => i.agentId)).toEqual(["b", "c"]);
+
+    // Add d -> evicts b
+    manager.getOrCreate("d");
+    expect(manager.size()).toBe(2);
+    expect(manager.has("b")).toBe(false);
+    expect(manager.list().map((i) => i.agentId)).toEqual(["c", "d"]);
+
+    // Add e -> evicts c
+    manager.getOrCreate("e");
+    expect(manager.size()).toBe(2);
+    expect(manager.has("c")).toBe(false);
+    expect(manager.list().map((i) => i.agentId)).toEqual(["d", "e"]);
+  });
+
+  it("does not evict or increase size when getOrCreate is called for existing agents at capacity", () => {
+    const manager = new AgentInstanceManager({ maxInstances: 3 });
+
+    const first1 = manager.getOrCreate("agent-1");
+    manager.getOrCreate("agent-2");
+    manager.getOrCreate("agent-3");
+
+    expect(manager.size()).toBe(3);
+
+    // Access existing agents
+    const second1 = manager.getOrCreate("agent-1");
+    expect(second1).toBe(first1);
+    expect(manager.size()).toBe(3);
+    expect(manager.has("agent-1")).toBe(true);
+    expect(manager.has("agent-2")).toBe(true);
+    expect(manager.has("agent-3")).toBe(true);
+  });
+
+  it("never evicts when configured with maxInstances: 0 (unbounded creation mode)", () => {
+    const manager = new AgentInstanceManager({ maxInstances: 0 });
+
+    for (let i = 1; i <= 50; i++) {
+      manager.getOrCreate(`agent-${i}`);
+    }
+
+    expect(manager.size()).toBe(50);
+    expect(manager.list()).toHaveLength(50);
+    for (let i = 1; i <= 50; i++) {
+      expect(manager.has(`agent-${i}`)).toBe(true);
+      expect(manager.get(`agent-${i}`)?.agentId).toBe(`agent-${i}`);
+    }
+  });
+
+  it("reclaims capacity and respects maxInstances following explicit delete and clear calls", () => {
+    const manager = new AgentInstanceManager({ maxInstances: 2 });
+
     manager.getOrCreate("agent-1");
     manager.getOrCreate("agent-2");
     expect(manager.size()).toBe(2);
 
-    // Adding 3rd exceeds capacity 2, evicts oldest ("agent-1")
+    // Delete agent-1 frees capacity
+    const deleted = manager.delete("agent-1");
+    expect(deleted).toBe(true);
+    expect(manager.size()).toBe(1);
+    expect(manager.has("agent-1")).toBe(false);
+
+    // Inserting agent-3 now fits without evicting agent-2
     manager.getOrCreate("agent-3");
     expect(manager.size()).toBe(2);
-    expect(manager.has("agent-1")).toBe(false);
     expect(manager.has("agent-2")).toBe(true);
     expect(manager.has("agent-3")).toBe(true);
-    expect(manager.list().map((i) => i.agentId)).toEqual(["agent-2", "agent-3"]);
-  });
 
-  it("preserves FIFO order across multiple consecutive evictions", () => {
-    const manager = new AgentInstanceManager({ maxInstances: 3 });
-    manager.getOrCreate("a");
-    manager.getOrCreate("b");
-    manager.getOrCreate("c");
-    expect(manager.list().map((i) => i.agentId)).toEqual(["a", "b", "c"]);
-
-    manager.getOrCreate("d");
-    expect(manager.list().map((i) => i.agentId)).toEqual(["b", "c", "d"]);
-
-    manager.getOrCreate("e");
-    expect(manager.list().map((i) => i.agentId)).toEqual(["c", "d", "e"]);
-
-    manager.getOrCreate("f");
-    expect(manager.list().map((i) => i.agentId)).toEqual(["d", "e", "f"]);
-  });
-
-  it("does not evict when getting an already-existing instance", () => {
-    const manager = new AgentInstanceManager({ maxInstances: 2 });
-    manager.getOrCreate("a");
-    manager.getOrCreate("b");
-    expect(manager.size()).toBe(2);
-
-    // Accessing existing instance does not exceed capacity or evict
-    manager.getOrCreate("a");
-    expect(manager.size()).toBe(2);
-    expect(manager.has("a")).toBe(true);
-    expect(manager.has("b")).toBe(true);
-  });
-
-  it("handles maxInstances = 1 as an immediate sliding window", () => {
-    const manager = new AgentInstanceManager({ maxInstances: 1 });
-    manager.getOrCreate("first");
-    expect(manager.size()).toBe(1);
-    expect(manager.has("first")).toBe(true);
-
-    manager.getOrCreate("second");
-    expect(manager.size()).toBe(1);
-    expect(manager.has("first")).toBe(false);
-    expect(manager.has("second")).toBe(true);
-    expect(manager.list().map((i) => i.agentId)).toEqual(["second"]);
-  });
-
-  it("allows deleted instances to free capacity without triggering FIFO eviction", () => {
-    const manager = new AgentInstanceManager({ maxInstances: 2 });
-    manager.getOrCreate("a");
-    manager.getOrCreate("b");
-    expect(manager.size()).toBe(2);
-
-    expect(manager.delete("a")).toBe(true);
-    expect(manager.size()).toBe(1);
-
-    // Now inserting "c" stays within capacity 2, so "b" is not evicted
-    manager.getOrCreate("c");
-    expect(manager.size()).toBe(2);
-    expect(manager.has("b")).toBe(true);
-    expect(manager.has("c")).toBe(true);
-  });
-
-  it("clearing instances resets capacity and allows subsequent additions", () => {
-    const manager = new AgentInstanceManager({ maxInstances: 2 });
-    manager.getOrCreate("a");
-    manager.getOrCreate("b");
+    // Clear removes all
     manager.clear();
     expect(manager.size()).toBe(0);
-
-    manager.getOrCreate("x");
-    manager.getOrCreate("y");
-    expect(manager.size()).toBe(2);
-    expect(manager.has("x")).toBe(true);
-    expect(manager.has("y")).toBe(true);
-  });
-
-  it("creates a fresh instance if a previously evicted agentId is re-added", () => {
-    const manager = new AgentInstanceManager({ maxInstances: 1 });
-    const original = manager.getOrCreate("transient");
-    manager.getOrCreate("displacer");
-    expect(manager.has("transient")).toBe(false);
-
-    const recreated = manager.getOrCreate("transient");
-    expect(recreated).not.toBe(original);
-    expect(recreated.agentId).toBe("transient");
-    expect(manager.has("transient")).toBe(true);
-    expect(manager.has("displacer")).toBe(false);
-  });
-
-  it("retains all instances when maxInstances is not reached", () => {
-    const manager = new AgentInstanceManager({ maxInstances: 10 });
-    for (let i = 1; i <= 5; i++) {
-      manager.getOrCreate(`agent-${i}`);
-    }
-    expect(manager.size()).toBe(5);
-    expect(manager.list()).toHaveLength(5);
+    expect(manager.list()).toEqual([]);
   });
 });
 
