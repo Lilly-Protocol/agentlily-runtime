@@ -1,16 +1,13 @@
-Fixes #230
+Fixes #231
 
 ### Summary
-Makes `JsonFileMemoryStore` fully satisfy the `MemoryStore` interface contract and align with `InMemoryMemoryStore` semantics.
+Eliminates duplicate `warn()` declarations and restores strict log level threshold filtering in `ConsoleRuntimeLogger`.
 
-- Updates `listByAgent(agentId, options?)` to respect `options.offset` and `options.limit` with defensive copying of returned entries.
-- Implements `countByAgent(agentId)` to return matching entry counts.
-- Implements `size()` returning total entry count asynchronously, avoiding type clashes with `InMemoryMemoryStore.size`.
-- Defensively copies entries in `append()` to prevent caller mutation of stored state.
-- Adds `JsonFileMemoryStoreOptions` supporting optional `maxEntries` and `maxEntriesPerAgent` with FIFO eviction.
-- Adds tests in `tests/memory/reproduce-issue-230.test.ts` and expands `tests/file-memory-store.test.ts`.
+- Consolidated `warn()` method implementation and gated output behind `shouldLog(level)` check against configured priority (`debug: 0, info: 1, warn: 2, error: 3`).
+- Preserved metadata redaction via `DEFAULT_REDACT_KEYS` regex.
+- Added level filtering tests in `tests/logger/issue-231-console-logger-dedup.test.ts` verifying `info` and `warn` suppression when level is set to `error`.
 
 ### Testing
-- `npm test`: 56/56 test files passed (238/238 tests, 96.04% line coverage)
-- `npm run typecheck`: clean (0 errors)
-- `npm run lint`: clean (0 errors)
+- `npm test`: 56/56 test files passed (232/232 tests)
+- `npm run typecheck`: clean (exit code 0)
+- `npm run lint`: clean (exit code 0)
