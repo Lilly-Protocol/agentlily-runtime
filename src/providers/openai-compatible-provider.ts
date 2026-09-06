@@ -4,6 +4,10 @@ import type {
   ModelResponse
 } from "./model-provider.js";
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 export interface OpenAICompatibleProviderOptions {
   apiKey: string;
   baseUrl?: string | undefined;
@@ -102,10 +106,11 @@ export class OpenAICompatibleModelProvider implements ModelProvider {
       throw new Error(`OpenAI-compatible provider request failed: ${message}`);
     }
 
+    const rawBody = await response.text().catch(() => "");
+
     if (!response.ok) {
-      const errorText = await response.text().catch(() => "");
       throw new Error(
-        `OpenAI-compatible provider returned HTTP ${response.status}: ${errorText}`
+        `OpenAI-compatible provider returned HTTP ${response.status}: ${rawBody}`
       );
     }
 
@@ -113,62 +118,53 @@ export class OpenAICompatibleModelProvider implements ModelProvider {
     try {
       responseText = await response.text();
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
       throw new Error(
-        `OpenAI-compatible provider failed to read successful HTTP ${response.status} response: ${message}`
+        `OpenAI-compatible provider could not read HTTP ${response.status} response body.`,
+        { cause: error }
       );
     }
 
     let data: unknown;
     try {
-      data = JSON.parse(responseText);
+      data = JSON.parse(responseText) as unknown;
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const excerpt = JSON.stringify(responseText.slice(0, 200));
       throw new Error(
-        `OpenAI-compatible provider returned invalid JSON for HTTP ${response.status}: ${message}. Body excerpt: ${getBodyExcerpt(responseText)}`
+        `OpenAI-compatible provider returned invalid JSON (HTTP ${response.status}): ${excerpt}${responseText.length > 200 ? "..." : ""}`,
+        { cause: error }
       );
     }
 
-    if (!isJsonObject(data)) {
+    if (
+      !isRecord(data) ||
+      !Array.isArray(data.choices) ||
+      data.choices.length === 0
+    ) {
       throw new Error(
-        `OpenAI-compatible provider returned an invalid response for HTTP ${response.status}: expected a JSON object.`
+        `OpenAI-compatible provider returned malformed response (HTTP ${response.status}): expected a non-empty choices array.`
       );
     }
 
-    const choicesValue = data.choices;
-    if (!Array.isArray(choicesValue) || choicesValue.length === 0) {
+    const choice: unknown = data.choices[0];
+    if (
+      !isRecord(choice) ||
+      !isRecord(choice.message) ||
+      typeof choice.message.content !== "string"
+    ) {
       throw new Error(
-        `OpenAI-compatible provider returned an invalid response for HTTP ${response.status}: expected a non-empty choices array.`
+        `OpenAI-compatible provider returned malformed response (HTTP ${response.status}): expected choices[0].message.content to be a string.`
       );
     }
 
-    const firstChoice = (choicesValue as unknown[])[0];
-    if (!isJsonObject(firstChoice)) {
-      throw new Error(
-        `OpenAI-compatible provider returned an invalid response for HTTP ${response.status}: expected the first choice to be an object.`
-      );
-    }
-
-    const message = firstChoice.message;
-    if (!isJsonObject(message)) {
-      throw new Error(
-        `OpenAI-compatible provider returned an invalid response for HTTP ${response.status}: expected first choice.message to be an object.`
-      );
-    }
-
-    const outputText = message.content;
-    if (typeof outputText !== "string") {
-      throw new Error(
-        `OpenAI-compatible provider returned an invalid response for HTTP ${response.status}: expected first choice.message.content to be a string.`
-      );
-    }
-
+    // Explicit empty strings are valid text responses. Missing/null content,
+    // including tool-call-only completions, cannot satisfy this text-only API.
+    const outputText = choice.message.content;
     const metadata: Record<string, unknown> = {
       model: data.model ?? this.model
     };
 
-    if (firstChoice.finish_reason !== undefined) {
-      metadata.finishReason = firstChoice.finish_reason;
+    if (choice.finish_reason !== undefined) {
+      metadata.finishReason = choice.finish_reason;
     }
     if (data.usage !== undefined) {
       metadata.usage = data.usage;
@@ -179,4 +175,16 @@ export class OpenAICompatibleModelProvider implements ModelProvider {
       metadata
     };
   }
+}
+
+function formatBodyExcerpt(body: string): string {
+  const compact = body.replace(/\s+/g, " ").trim();
+  if (compact.length === 0) {
+    return "<empty body>";
+  }
+
+  const maxLength = 500;
+  return compact.length > maxLength
+    ? `${compact.slice(0, maxLength)}...`
+    : compact;
 }
