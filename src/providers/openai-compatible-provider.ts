@@ -16,6 +16,17 @@ export interface OpenAICompatibleProviderOptions {
   headers?: Record<string, string> | undefined;
 }
 
+type JsonObject = Record<string, unknown>;
+
+function isJsonObject(value: unknown): value is JsonObject {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function getBodyExcerpt(body: string): string {
+  const excerpt = body.replace(/\s+/g, " ").trim().slice(0, 200);
+  return excerpt.length > 0 ? excerpt : "<empty body>";
+}
+
 export class OpenAICompatibleModelProvider implements ModelProvider {
   public readonly name = "openai-compatible";
   private readonly apiKey: string;
