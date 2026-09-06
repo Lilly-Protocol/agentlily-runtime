@@ -5,6 +5,72 @@ import {
 } from "../../src/logger/runtime-logger.js";
 
 describe("InMemoryRuntimeLogger", () => {
+  it("records all supported levels by default", () => {
+    const logger = new InMemoryRuntimeLogger();
+
+    logger.debug("debug");
+    logger.info("info");
+    logger.warn("warn");
+    logger.error("error");
+
+    expect(logger.entries.map((entry) => entry.level)).toEqual([
+      "debug",
+      "info",
+      "warn",
+      "error"
+    ]);
+    expect(logger.size()).toBe(4);
+  });
+
+  it("filters entries below the configured threshold", () => {
+    const logger = new InMemoryRuntimeLogger({ level: "warn" });
+
+    logger.debug("debug");
+    logger.info("info");
+    logger.warn("warn");
+    logger.error("error");
+
+    expect(logger.entries.map((entry) => entry.level)).toEqual([
+      "warn",
+      "error"
+    ]);
+    expect(logger.size()).toBe(2);
+  });
+
+  it("preserves retained order and clear semantics after filtering", () => {
+    const logger = new InMemoryRuntimeLogger({ level: "warn" });
+
+    logger.info("ignored");
+    logger.warn("first");
+    logger.debug("also ignored");
+    logger.error("second");
+
+    expect(logger.entries.map((entry) => entry.message)).toEqual([
+      "first",
+      "second"
+    ]);
+    expect(logger.size()).toBe(2);
+
+    logger.clear();
+
+    expect(logger.entries).toEqual([]);
+    expect(logger.size()).toBe(0);
+  });
+
+  it("does not let filtered entries affect maxEntries eviction", () => {
+    const logger = new InMemoryRuntimeLogger({ level: "warn", maxEntries: 2 });
+
+    logger.warn("first");
+    logger.error("second");
+    logger.info("ignored");
+    logger.warn("third");
+
+    expect(logger.entries.map((entry) => entry.message)).toEqual([
+      "second",
+      "third"
+    ]);
+  });
+
   it("records info entries with correct level and message", () => {
     const logger = new InMemoryRuntimeLogger();
     logger.info("test message");

@@ -15,6 +15,13 @@ const LOG_LEVEL_PRIORITY: Record<RuntimeLogLevel, number> = {
   error: 3
 };
 
+function shouldLog(
+  level: RuntimeLogLevel,
+  minimumLevel: RuntimeLogLevel
+): boolean {
+  return LOG_LEVEL_PRIORITY[level] >= LOG_LEVEL_PRIORITY[minimumLevel];
+}
+
 export interface ConsoleRuntimeLoggerOptions {
   level?: RuntimeLogLevel;
   redactKeys?: RegExp;
@@ -135,6 +142,7 @@ export class InMemoryRuntimeLogger implements RuntimeLogger {
   private readonly redactKeys: RegExp;
 
   public constructor(options: InMemoryRuntimeLoggerOptions = {}) {
+    this.minimumLevel = options.level ?? "debug";
     this.maxEntries = options.maxEntries ?? 5_000;
     this.minimumLevel = options.level;
     this.redactKeys = options.redactKeys ?? DEFAULT_REDACT_KEYS;
