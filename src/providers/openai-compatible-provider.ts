@@ -4,6 +4,10 @@ import type {
   ModelResponse
 } from "./model-provider.js";
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 export interface OpenAICompatibleProviderOptions {
   apiKey: string;
   baseUrl?: string | undefined;
@@ -98,24 +102,57 @@ export class OpenAICompatibleModelProvider implements ModelProvider {
       );
     }
 
-    const data = (await response.json()) as {
-      choices?: Array<{
-        message?: {
-          content?: string;
-        };
-        finish_reason?: string;
-      }>;
-      usage?: Record<string, unknown>;
-      model?: string;
-    };
+    let responseText: string;
+    try {
+      responseText = await response.text();
+    } catch (error) {
+      throw new Error(
+        `OpenAI-compatible provider could not read HTTP ${response.status} response body.`,
+        { cause: error }
+      );
+    }
 
-    const outputText = data.choices?.[0]?.message?.content ?? "";
+    let data: unknown;
+    try {
+      data = JSON.parse(responseText) as unknown;
+    } catch (error) {
+      const excerpt = JSON.stringify(responseText.slice(0, 200));
+      throw new Error(
+        `OpenAI-compatible provider returned invalid JSON (HTTP ${response.status}): ${excerpt}${responseText.length > 200 ? "..." : ""}`,
+        { cause: error }
+      );
+    }
+
+    if (
+      !isRecord(data) ||
+      !Array.isArray(data.choices) ||
+      data.choices.length === 0
+    ) {
+      throw new Error(
+        `OpenAI-compatible provider returned malformed response (HTTP ${response.status}): expected a non-empty choices array.`
+      );
+    }
+
+    const choice: unknown = data.choices[0];
+    if (
+      !isRecord(choice) ||
+      !isRecord(choice.message) ||
+      typeof choice.message.content !== "string"
+    ) {
+      throw new Error(
+        `OpenAI-compatible provider returned malformed response (HTTP ${response.status}): expected choices[0].message.content to be a string.`
+      );
+    }
+
+    // Explicit empty strings are valid text responses. Missing/null content,
+    // including tool-call-only completions, cannot satisfy this text-only API.
+    const outputText = choice.message.content;
     const metadata: Record<string, unknown> = {
       model: data.model ?? this.model
     };
 
-    if (data.choices?.[0]?.finish_reason !== undefined) {
-      metadata.finishReason = data.choices[0].finish_reason;
+    if (choice.finish_reason !== undefined) {
+      metadata.finishReason = choice.finish_reason;
     }
     if (data.usage !== undefined) {
       metadata.usage = data.usage;

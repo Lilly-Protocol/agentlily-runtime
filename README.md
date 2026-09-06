@@ -25,7 +25,7 @@ The current implementation demonstrates a narrow, credible runtime path:
 3. Build a runtime context for a task
 4. Execute a task through the task runner and action executor
 5. Invoke a typed tool
-6. Persist lightweight in-memory task history
+6. Persist lightweight in-memory task history (or durable JSON file history via memoryStoragePath)
 7. Emit runtime events and structured log entries
 
 This gives contributors a working reference path without locking the project
@@ -37,7 +37,7 @@ The following areas are scaffolded with interfaces, types, or placeholders and
 are expected to become contributor work:
 
 - Wallet-aware and payment-aware actions
-- Persistent memory and state backends
+- Persistent database and vector storage backends (basic file-based JSON persistence is supported via JsonFileMemoryStore)
 - Model provider integrations (an `OpenAICompatibleModelProvider` scaffold is available for experimentation; note that it is scaffolded and intentionally not production-complete)
 - Runtime policy engines and approval flows
 - Long-running orchestration and scheduling
@@ -63,6 +63,13 @@ src/
   tools/       Tool contracts and registry
 tests/         Foundation and happy-path tests
 ```
+
+## Requirements & Supported Node.js Versions
+
+`agentlily-runtime` declares `"engines": { "node": ">=20" }`. The CI workflow actively verifies formatting, linting, typechecking, and the full test suite across a matrix of supported Node.js LTS lines:
+
+- **Node.js 20** (Declared baseline LTS floor)
+- **Node.js 22** (Active LTS)
 
 ## Quick Start
 
@@ -100,6 +107,62 @@ const result = await runtime.executeTask({
 });
 
 console.log(result.output);
+```
+
+## Runtime Events
+
+`agentlily-runtime` exposes an event system via `RuntimeEventBus` to support observability, audit logs, and tracing adapters.
+
+### Event Catalog (`RuntimeEventMap`)
+
+| Event Name               | Description                                              | Key Payload Fields                                         |
+| :----------------------- | :------------------------------------------------------- | :--------------------------------------------------------- |
+| `runtime.started`        | Emitted once when `runtime.start()` succeeds             | `runtimeId`, `occurredAt`                                  |
+| `runtime.stopped`        | Emitted when `runtime.stop()` completes                  | `runtimeId`, `occurredAt`                                  |
+| `runtime.task.received`  | Emitted when a task is accepted for execution            | `runtimeId`, `taskId`, `agentId`                           |
+| `runtime.task.completed` | Emitted when a task executes successfully                | `runtimeId`, `taskId`, `agentId`, `toolName`, `durationMs` |
+| `runtime.task.failed`    | Emitted when task execution fails                        | `runtimeId`, `taskId`, `agentId`, `reason`                 |
+| `runtime.tool.invoked`   | Emitted when an individual tool action is invoked        | `runtimeId`, `taskId`, `agentId`, `toolName`, `invokedAt`  |
+| `runtime.internal.error` | Emitted when an event listener throws an unhandled error | `eventName`, `errorMessage`, `occurredAt`                  |
+
+### Subscribing to Events
+
+You can inject a custom `RuntimeEventBus` during initialization or subscribe directly via `runtime.eventBus`:
+
+```ts
+import {
+  AgentRuntime,
+  RuntimeEventBus
+} from "@lily-protocol/agentlily-runtime";
+
+const eventBus = new RuntimeEventBus();
+
+// Subscribe to task completion and failure events
+const unsubscribeCompleted = eventBus.on("runtime.task.completed", (event) => {
+  console.log(
+    `Task ${event.payload.taskId} completed in ${event.payload.durationMs}ms`
+  );
+});
+
+const unsubscribeFailed = eventBus.on("runtime.task.failed", (event) => {
+  console.error(`Task ${event.payload.taskId} failed: ${event.payload.reason}`);
+});
+
+// Single-fire listener
+eventBus.once("runtime.started", (event) => {
+  console.log(`Runtime started at ${event.payload.occurredAt}`);
+});
+
+const runtime = new AgentRuntime({
+  runtimeId: "monitored-runtime",
+  eventBus
+});
+
+await runtime.start();
+
+// Unsubscribe when no longer needed
+unsubscribeCompleted();
+unsubscribeFailed();
 ```
 
 ## Scripts
