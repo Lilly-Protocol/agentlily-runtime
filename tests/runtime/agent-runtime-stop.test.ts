@@ -1,21 +1,53 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { InMemoryRuntimeLogger } from "../../src/logger/runtime-logger.js";
 import { AgentRuntime } from "../../src/runtime/agent-runtime.js";
 import type { RuntimeOptions } from "../../src/runtime/types.js";
 
 describe("AgentRuntime.stop", () => {
   let runtime: AgentRuntime;
   let emitSpy: ReturnType<typeof vi.fn>;
+  let logger: InMemoryRuntimeLogger;
+
+  function deferred() {
+    let resolve!: () => void;
+    const promise = new Promise<void>((res) => {
+      resolve = res;
+    });
+    return { promise, resolve };
+  }
+
+  function taskInput(taskId: string) {
+    return {
+      taskId,
+      agentId: "agent-1",
+      toolName: "blocked",
+      input: "test",
+      payload: {}
+    };
+  }
+
+  function registerBlockedTask() {
+    const started = deferred();
+    const release = deferred();
+
+    runtime.registerTool({
+      name: "blocked",
+      description: "Waits until released",
+      execute: async () => {
+        started.resolve();
+        await release.promise;
+        return { done: true };
+      }
+    });
+
+    return { started, release };
+  }
 
   beforeEach(() => {
+    logger = new InMemoryRuntimeLogger();
     const options: RuntimeOptions = {
       runtimeId: "test-runtime-stop",
-      logger: {
-        level: "error",
-        info: vi.fn(),
-        warn: vi.fn(),
-        error: vi.fn(),
-        debug: vi.fn()
-      }
+      logger
     };
     runtime = new AgentRuntime(options);
     emitSpy = vi.fn();
