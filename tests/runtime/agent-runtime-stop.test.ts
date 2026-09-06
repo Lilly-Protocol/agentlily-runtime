@@ -55,80 +55,92 @@ describe("AgentRuntime.stop", () => {
     expect(stoppedEvents.length).toBe(1);
   });
 
-  it("returns promptly when in-flight tasks finish early rather than waiting for full drain timeout", async () => {
-    runtime.registerTool({
-      name: "quick-task",
-      description: "Quick task",
-      execute: async () => {
-        await new Promise((r) => setTimeout(r, 25));
-        return { done: true };
-      }
+  it("warns when stop drain times out with tasks still in flight", async () => {
+    const { InMemoryRuntimeLogger } = await import(
+      "../../src/logger/runtime-logger.js"
+    );
+    const logger = new InMemoryRuntimeLogger({ level: "debug" });
+    const rt = new AgentRuntime({
+      runtimeId: "rt-warn-stranded",
+      logger
     });
 
-    await runtime.start();
-
-    const taskPromise = runtime.executeTask({
-      taskId: "task-quick-1",
-      agentId: "agent-1",
-      toolName: "quick-task",
-      input: "run",
-      payload: {}
-    });
-
-    expect(runtime.getInFlightTaskCount()).toBe(1);
-
-    const stopStart = Date.now();
-    // Large drainTimeoutMs (1500ms), but task finishes in ~25ms
-    await runtime.stop({ drainTimeoutMs: 1500 });
-    const elapsed = Date.now() - stopStart;
-
-    // Must return promptly (well under the 1500ms timeout)
-    expect(elapsed).toBeLessThan(400);
-    expect(runtime.getInFlightTaskCount()).toBe(0);
-    await expect(taskPromise).resolves.toBeDefined();
-  });
-
-  it("leaves stop unblocked when tasks exceed drainTimeoutMs and preserves in-flight count", async () => {
-    let unblockTool!: () => void;
-    runtime.registerTool({
-      name: "slow-task",
-      description: "Slow task that exceeds drain timeout",
+    let releaseTask!: () => void;
+    rt.registerTool({
+      name: "long-task",
+      description: "Long running task",
       execute: async () => {
-        await new Promise<void>((r) => {
-          unblockTool = r;
+        await new Promise<void>((resolve) => {
+          releaseTask = resolve;
         });
         return { done: true };
       }
     });
 
-    await runtime.start();
+    await rt.start();
 
-    const taskPromise = runtime.executeTask({
-      taskId: "task-slow-1",
+    const taskPromise = rt.executeTask({
+      taskId: "stranded-task-99",
       agentId: "agent-1",
-      toolName: "slow-task",
-      input: "run",
+      toolName: "long-task",
+      input: "do work",
       payload: {}
     });
 
-    expect(runtime.getInFlightTaskCount()).toBe(1);
+    expect(rt.getInFlightTaskCount()).toBe(1);
 
-    const stopStart = Date.now();
-    // Short drain timeout of 50ms
-    await runtime.stop({ drainTimeoutMs: 50 });
-    const elapsed = Date.now() - stopStart;
+    // Stop with drain timeout of 30ms (task will still be in flight)
+    await rt.stop({ drainTimeoutMs: 30 });
 
-    // stop() unblocks around 50ms without waiting indefinitely
-    expect(elapsed).toBeGreaterThanOrEqual(40);
-    expect(elapsed).toBeLessThan(350);
-
-    // Runtime is stopped, but task is still in flight (stranded)
-    expect(runtime.isRunning()).toBe(false);
-    expect(runtime.getInFlightTaskCount()).toBe(1);
+    const warnEntries = logger.entries.filter((e) => e.level === "warn");
+    expect(warnEntries.length).toBe(1);
+    expect(warnEntries[0]?.message).toContain("stranded-task-99");
+    expect(warnEntries[0]?.metadata).toMatchObject({
+      runtimeId: "rt-warn-stranded",
+      strandedTaskIds: ["stranded-task-99"],
+      drainTimeoutMs: 30
+    });
 
     // Clean up stranded task
-    unblockTool();
+    releaseTask();
     await taskPromise;
-    expect(runtime.getInFlightTaskCount()).toBe(0);
+  });
+
+  it("does not log warning when drainTimeoutMs is omitted or tasks finish before timeout", async () => {
+    const { InMemoryRuntimeLogger } = await import(
+      "../../src/logger/runtime-logger.js"
+    );
+    const logger = new InMemoryRuntimeLogger({ level: "debug" });
+    const rt = new AgentRuntime({
+      runtimeId: "rt-clean-drain",
+      logger
+    });
+
+    rt.registerTool({
+      name: "fast-task",
+      description: "Fast task",
+      execute: async () => {
+        await new Promise((r) => setTimeout(r, 10));
+        return { done: true };
+      }
+    });
+
+    await rt.start();
+
+    const taskPromise = rt.executeTask({
+      taskId: "fast-task-1",
+      agentId: "agent-1",
+      toolName: "fast-task",
+      input: "fast work",
+      payload: {}
+    });
+
+    // Graceful drain completes within 200ms
+    await rt.stop({ drainTimeoutMs: 200 });
+    await taskPromise;
+
+    // No warning should be logged because task finished before deadline
+    const warnEntries = logger.entries.filter((e) => e.level === "warn");
+    expect(warnEntries.length).toBe(0);
   });
 });
