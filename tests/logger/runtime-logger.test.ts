@@ -50,6 +50,49 @@ describe("InMemoryRuntimeLogger", () => {
       "info"
     ]);
   });
+
+  it("filters entries below configured minimum level (Issue #266)", () => {
+    const logger = new InMemoryRuntimeLogger({ level: "warn" });
+
+    logger.debug("debug message");
+    logger.info("info message");
+    logger.warn("warn message");
+    logger.error("error message");
+
+    expect(logger.entries).toHaveLength(2);
+    expect(logger.entries.map((e) => e.level)).toEqual(["warn", "error"]);
+    expect(logger.entries.map((e) => e.message)).toEqual([
+      "warn message",
+      "error message"
+    ]);
+    expect(logger.size()).toBe(2);
+  });
+
+  it("records all levels by default when options are omitted (#266)", () => {
+    const logger = new InMemoryRuntimeLogger();
+
+    logger.debug("debug message");
+    logger.info("info message");
+    logger.warn("warn message");
+    logger.error("error message");
+
+    expect(logger.entries).toHaveLength(4);
+    expect(logger.size()).toBe(4);
+    expect(logger.entries.map((e) => e.level)).toEqual([
+      "debug",
+      "info",
+      "warn",
+      "error"
+    ]);
+  });
+
+  it("exposes level property reflecting configured minimum level", () => {
+    const defaultLogger = new InMemoryRuntimeLogger();
+    expect(defaultLogger.level).toBe("debug");
+
+    const warnLogger = new InMemoryRuntimeLogger({ level: "warn" });
+    expect(warnLogger.level).toBe("warn");
+  });
 });
 
 describe("ConsoleRuntimeLogger", () => {
