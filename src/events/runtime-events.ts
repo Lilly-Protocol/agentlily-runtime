@@ -114,7 +114,7 @@ export class RuntimeEventBus {
   ): () => void {
     const wrapped: RuntimeEventListener<TName> = (event) => {
       this.off(eventName, wrapped);
-      listener(event);
+      return listener(event);
     };
     this.on(eventName, wrapped);
     return () => this.off(eventName, wrapped);
