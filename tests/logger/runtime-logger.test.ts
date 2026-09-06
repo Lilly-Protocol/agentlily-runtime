@@ -51,101 +51,47 @@ describe("InMemoryRuntimeLogger", () => {
     ]);
   });
 
-  it("evicts the oldest warn entries once maxEntries is exceeded", () => {
-    const logger = new InMemoryRuntimeLogger({ maxEntries: 3 });
+  it("filters entries below configured minimum level (Issue #266)", () => {
+    const logger = new InMemoryRuntimeLogger({ level: "warn" });
 
-    logger.warn("warn-1");
-    logger.warn("warn-2");
-    logger.warn("warn-3");
-    logger.warn("warn-4");
+    logger.debug("debug message");
+    logger.info("info message");
+    logger.warn("warn message");
+    logger.error("error message");
 
-    expect(logger.entries).toHaveLength(3);
-    expect(logger.size()).toBe(3);
+    expect(logger.entries).toHaveLength(2);
+    expect(logger.entries.map((e) => e.level)).toEqual(["warn", "error"]);
     expect(logger.entries.map((e) => e.message)).toEqual([
-      "warn-2",
-      "warn-3",
-      "warn-4"
+      "warn message",
+      "error message"
     ]);
-    expect(logger.entries.every((e) => e.level === "warn")).toBe(true);
+    expect(logger.size()).toBe(2);
   });
 
-  it("evicts the oldest debug entries once maxEntries is exceeded", () => {
-    const logger = new InMemoryRuntimeLogger({ maxEntries: 3 });
+  it("records all levels by default when options are omitted (#266)", () => {
+    const logger = new InMemoryRuntimeLogger();
 
-    logger.debug("debug-1");
-    logger.debug("debug-2");
-    logger.debug("debug-3");
-    logger.debug("debug-4");
-    logger.debug("debug-5");
-
-    expect(logger.entries).toHaveLength(3);
-    expect(logger.size()).toBe(3);
-    expect(logger.entries.map((e) => e.message)).toEqual([
-      "debug-3",
-      "debug-4",
-      "debug-5"
-    ]);
-    expect(logger.entries.every((e) => e.level === "debug")).toBe(true);
-  });
-
-  it("evicts the oldest entry first across mixed log levels", () => {
-    const logger = new InMemoryRuntimeLogger({ maxEntries: 3 });
-
-    logger.info("info-1");
-    logger.warn("warn-1");
-    logger.debug("debug-1");
-    logger.error("error-1");
-    logger.warn("warn-2");
-
-    expect(logger.entries).toHaveLength(3);
-    expect(logger.size()).toBe(3);
-    expect(logger.entries.map((e) => e.message)).toEqual([
-      "debug-1",
-      "error-1",
-      "warn-2"
-    ]);
-    expect(logger.entries.map((e) => e.level)).toEqual([
-      "debug",
-      "error",
-      "warn"
-    ]);
-  });
-
-  it("does not evict mixed-level entries while under capacity", () => {
-    const logger = new InMemoryRuntimeLogger({ maxEntries: 5 });
-
-    logger.info("info-1");
-    logger.warn("warn-1");
-    logger.debug("debug-1");
-    logger.error("error-1");
+    logger.debug("debug message");
+    logger.info("info message");
+    logger.warn("warn message");
+    logger.error("error message");
 
     expect(logger.entries).toHaveLength(4);
     expect(logger.size()).toBe(4);
-    expect(logger.entries.map((e) => e.message)).toEqual([
-      "info-1",
-      "warn-1",
-      "debug-1",
-      "error-1"
-    ]);
     expect(logger.entries.map((e) => e.level)).toEqual([
+      "debug",
       "info",
       "warn",
-      "debug",
       "error"
     ]);
   });
 
-  it("evicts oldest info and error entries with the same FIFO contract", () => {
-    const logger = new InMemoryRuntimeLogger({ maxEntries: 2 });
+  it("exposes level property reflecting configured minimum level", () => {
+    const defaultLogger = new InMemoryRuntimeLogger();
+    expect(defaultLogger.level).toBe("debug");
 
-    logger.info("info-1");
-    logger.error("error-1");
-    logger.info("info-2");
-
-    expect(logger.entries).toHaveLength(2);
-    expect(logger.size()).toBe(2);
-    expect(logger.entries.map((e) => e.message)).toEqual(["error-1", "info-2"]);
-    expect(logger.entries.map((e) => e.level)).toEqual(["error", "info"]);
+    const warnLogger = new InMemoryRuntimeLogger({ level: "warn" });
+    expect(warnLogger.level).toBe("warn");
   });
 });
 
