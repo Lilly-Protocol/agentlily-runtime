@@ -25,18 +25,27 @@ export function createRuntimeDependencies(options: RuntimeOptions) {
     (options.memoryStoragePath
       ? new JsonFileMemoryStore(options.memoryStoragePath)
       : new InMemoryMemoryStore());
-  const modelProvider =
-    options.modelProvider ?? new UnconfiguredModelProvider();
   const logger = options.logger ?? new ConsoleRuntimeLogger();
+  const modelProvider =
+    options.modelProvider ?? new UnconfiguredModelProvider(logger);
   const stateStore = options.stateStore ?? new InMemoryRuntimeStateStore();
   const eventBus = options.eventBus ?? new RuntimeEventBus();
-  const agentManager = new AgentInstanceManager();
+  const agentManager = new AgentInstanceManager(
+    options.maxAgentInstances !== undefined
+      ? { maxInstances: options.maxAgentInstances }
+      : {}
+  );
   const actionExecutor = new ActionExecutor(
     toolRegistry,
     options.maxToolCallsPerTask,
-    eventBus
+    eventBus,
+    logger
   );
-  const taskRunner = new TaskRunner(actionExecutor, memoryStore);
+  const taskRunner = new TaskRunner(
+    actionExecutor,
+    memoryStore,
+    options.maxTaskDurationMs
+  );
 
   return {
     actionExecutor,

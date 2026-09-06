@@ -4,6 +4,10 @@ import type {
   ModelResponse
 } from "./model-provider.js";
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 export interface OpenAICompatibleProviderOptions {
   apiKey: string;
   baseUrl?: string | undefined;
@@ -98,53 +102,57 @@ export class OpenAICompatibleModelProvider implements ModelProvider {
       );
     }
 
-    const responseBody = await response.text();
-    let parsed: unknown;
-
+    let responseText: string;
     try {
-      parsed = JSON.parse(responseBody);
-    } catch {
+      responseText = await response.text();
+    } catch (error) {
       throw new Error(
-        `OpenAI-compatible provider returned invalid JSON for HTTP ${response.status}: ${formatBodyExcerpt(responseBody)}`
+        `OpenAI-compatible provider could not read HTTP ${response.status} response body.`,
+        { cause: error }
       );
     }
 
-    if (typeof parsed !== "object" || parsed === null) {
+    let data: unknown;
+    try {
+      data = JSON.parse(responseText) as unknown;
+    } catch (error) {
+      const excerpt = JSON.stringify(responseText.slice(0, 200));
       throw new Error(
-        `OpenAI-compatible provider returned a malformed response for HTTP ${response.status}: expected a JSON object. Body: ${formatBodyExcerpt(responseBody)}`
+        `OpenAI-compatible provider returned invalid JSON (HTTP ${response.status}): ${excerpt}${responseText.length > 200 ? "..." : ""}`,
+        { cause: error }
       );
     }
 
-    const data = parsed as {
-      choices?: unknown;
-      usage?: Record<string, unknown>;
-      model?: string;
-    };
-
-    if (!Array.isArray(data.choices) || data.choices.length === 0) {
+    if (
+      !isRecord(data) ||
+      !Array.isArray(data.choices) ||
+      data.choices.length === 0
+    ) {
       throw new Error(
-        `OpenAI-compatible provider returned a malformed response for HTTP ${response.status}: expected choices to contain at least one entry. Body: ${formatBodyExcerpt(responseBody)}`
+        `OpenAI-compatible provider returned malformed response (HTTP ${response.status}): expected a non-empty choices array.`
       );
     }
 
-    const firstChoice = data.choices[0] as {
-      message?: { content?: unknown };
-      finish_reason?: string;
-    } | null;
-    const outputText = firstChoice?.message?.content;
-
-    if (typeof outputText !== "string") {
+    const choice: unknown = data.choices[0];
+    if (
+      !isRecord(choice) ||
+      !isRecord(choice.message) ||
+      typeof choice.message.content !== "string"
+    ) {
       throw new Error(
-        `OpenAI-compatible provider returned a malformed response for HTTP ${response.status}: expected choices[0].message.content to be a string. Body: ${formatBodyExcerpt(responseBody)}`
+        `OpenAI-compatible provider returned malformed response (HTTP ${response.status}): expected choices[0].message.content to be a string.`
       );
     }
 
+    // Explicit empty strings are valid text responses. Missing/null content,
+    // including tool-call-only completions, cannot satisfy this text-only API.
+    const outputText = choice.message.content;
     const metadata: Record<string, unknown> = {
       model: data.model ?? this.model
     };
 
-    if (firstChoice?.finish_reason !== undefined) {
-      metadata.finishReason = firstChoice.finish_reason;
+    if (choice.finish_reason !== undefined) {
+      metadata.finishReason = choice.finish_reason;
     }
     if (data.usage !== undefined) {
       metadata.usage = data.usage;
