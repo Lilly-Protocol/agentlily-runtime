@@ -19,7 +19,7 @@ export class UnconfiguredModelProvider implements ModelProvider {
   public readonly name = "unconfigured";
   private readonly logger: RuntimeLogger | undefined;
 
-  public constructor(logger?: RuntimeLogger | undefined) {
+  public constructor(logger?: RuntimeLogger) {
     this.logger = logger;
   }
 

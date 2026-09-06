@@ -1,5 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
-import { ConsoleRuntimeLogger } from "../../src/logger/runtime-logger.js";
+import {
+  ConsoleRuntimeLogger,
+  InMemoryRuntimeLogger
+} from "../../src/logger/runtime-logger.js";
 
 describe("ConsoleRuntimeLogger redaction", () => {
   it("redacts default sensitive keys (secret, token, password, apiKey, authorization)", () => {
@@ -108,5 +111,75 @@ describe("ConsoleRuntimeLogger redaction", () => {
     expect(loggedMeta.detail).toBe("oops");
 
     errorSpy.mockRestore();
+  });
+});
+
+describe("InMemoryRuntimeLogger redaction", () => {
+  it("redacts sensitive metadata for all log levels", () => {
+    const logger = new InMemoryRuntimeLogger();
+
+    logger.debug("debug", { apiKey: "debug-secret", safe: "debug" });
+    logger.info("info", { password: "info-secret", safe: "info" });
+    logger.warn("warn", { token: "warn-secret", safe: "warn" });
+    logger.error("error", { authorization: "error-secret", safe: "error" });
+
+    expect(logger.entries).toEqual([
+      {
+        level: "debug",
+        message: "debug",
+        metadata: { apiKey: "[REDACTED]", safe: "debug" }
+      },
+      {
+        level: "info",
+        message: "info",
+        metadata: { password: "[REDACTED]", safe: "info" }
+      },
+      {
+        level: "warn",
+        message: "warn",
+        metadata: { token: "[REDACTED]", safe: "warn" }
+      },
+      {
+        level: "error",
+        message: "error",
+        metadata: { authorization: "[REDACTED]", safe: "error" }
+      }
+    ]);
+  });
+
+  it("redacts nested metadata recursively", () => {
+    const logger = new InMemoryRuntimeLogger();
+
+    logger.info("nested", {
+      user: {
+        credentials: { password: "secret", token: "token" },
+        name: "Alice"
+      },
+      safe: "value"
+    });
+
+    expect(logger.entries[0]!.metadata).toEqual({
+      user: {
+        credentials: { password: "[REDACTED]", token: "[REDACTED]" },
+        name: "Alice"
+      },
+      safe: "value"
+    });
+  });
+
+  it("supports a custom redactKeys pattern", () => {
+    const logger = new InMemoryRuntimeLogger({ redactKeys: /^ssn$/i });
+
+    logger.info("custom", {
+      ssn: "123-45-6789",
+      token: "visible-token",
+      name: "Alice"
+    });
+
+    expect(logger.entries[0]!.metadata).toEqual({
+      ssn: "[REDACTED]",
+      token: "visible-token",
+      name: "Alice"
+    });
   });
 });
