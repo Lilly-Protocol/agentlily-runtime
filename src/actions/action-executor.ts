@@ -45,6 +45,7 @@ export class ActionExecutor {
     }
 
     const tool = this.toolRegistry.get(toolName);
+
     this.toolCallCounts.set(context.taskId, currentCount + 1);
 
     const startedAt = Date.now();

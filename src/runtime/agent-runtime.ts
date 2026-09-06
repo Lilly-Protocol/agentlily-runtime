@@ -16,6 +16,7 @@ export class AgentRuntime {
   private readonly dependencies: ReturnType<typeof createRuntimeDependencies>;
   private readonly runtimeId: string;
   private readonly inFlightTasks = new Set<string>();
+  private readonly inFlightPromises = new Map<string, Promise<void>>();
   private started = false;
   private stopped = false;
 
@@ -82,7 +83,30 @@ export class AgentRuntime {
     this.started = false;
 
     if (options.drainTimeoutMs !== undefined && options.drainTimeoutMs > 0) {
-      await this.drainInFlightTasks(options.drainTimeoutMs);
+      await this.awaitInFlightTasks(options.drainTimeoutMs);
+    }
+
+    // After draining, if there are still in-flight tasks, warn
+    if (this.inFlightTasks.size > 0) {
+      const stranded = Array.from(this.inFlightTasks);
+      this.dependencies.logger.warn(
+        `AgentRuntime.stop() timed out after ${options.drainTimeoutMs}ms with ${stranded.length} task(s) still in flight: ${stranded.join(", ")}`,
+        {
+          runtimeId: this.runtimeId,
+          strandedTaskIds: stranded,
+          drainTimeoutMs: options.drainTimeoutMs,
+          elapsedMs: options.drainTimeoutMs
+        }
+      );
+      this.dependencies.eventBus.emit({
+        name: "runtime.stopped",
+        payload: {
+          runtimeId: this.runtimeId,
+          occurredAt: new Date().toISOString(),
+          strandedTaskIds: stranded,
+          drainTimeoutMs: options.drainTimeoutMs
+        }
+      });
     }
 
     if (options.clearListeners === true) {
@@ -108,7 +132,6 @@ export class AgentRuntime {
     task: RuntimeTask<TPayload>
   ): Promise<TaskExecutionResult<TResult>> {
     assertRuntimeStarted(this.started);
-
     const agent = this.dependencies.agentManager.getOrCreate(task.agentId);
     const context: RuntimeContext = {
       runtimeId: this.runtimeId,
@@ -136,68 +159,68 @@ export class AgentRuntime {
     });
 
     this.inFlightTasks.add(task.taskId);
-    try {
-      const result = await this.dependencies.taskRunner.run<TPayload, TResult>(
-        task,
-        context
-      );
 
-      this.dependencies.logger.info("Runtime task completed.", {
-        runtimeId: this.runtimeId,
-        taskId: task.taskId,
-        toolName: task.toolName,
-        durationMs: result.durationMs
-      });
-
-      this.dependencies.eventBus.emit({
-        name: "runtime.task.completed",
-        payload: {
+    const taskPromise = (async () => {
+      try {
+        const result = await this.dependencies.taskRunner.run<TPayload, TResult>(
+          task,
+          context
+        );
+        this.dependencies.logger.info("Runtime task completed.", {
           runtimeId: this.runtimeId,
           taskId: task.taskId,
-          agentId: task.agentId,
           toolName: task.toolName,
           durationMs: result.durationMs
-        }
-      });
-
-      return result;
-    } catch (error) {
-      const reason =
-        error instanceof Error ? error.message : "Unknown runtime failure.";
-
-      this.dependencies.logger.error("Runtime task failed.", {
-        runtimeId: this.runtimeId,
-        taskId: task.taskId,
-        reason
-      });
-      this.dependencies.eventBus.emit({
-        name: "runtime.task.failed",
-        payload: {
+        });
+        this.dependencies.eventBus.emit({
+          name: "runtime.task.completed",
+          payload: {
+            runtimeId: this.runtimeId,
+            taskId: task.taskId,
+            agentId: task.agentId,
+            toolName: task.toolName,
+            durationMs: result.durationMs
+          }
+        });
+        return result;
+      } catch (error) {
+        this.dependencies.logger.error("Runtime task failed.", {
           runtimeId: this.runtimeId,
           taskId: task.taskId,
-          agentId: task.agentId,
-          reason
-        }
-      });
-
-      throw error;
-    } finally {
-      this.inFlightTasks.delete(task.taskId);
-    }
-  }
-
-  private async drainInFlightTasks(timeoutMs: number): Promise<void> {
-    const deadline = Date.now() + timeoutMs;
-    while (this.inFlightTasks.size > 0) {
-      const remaining = deadline - Date.now();
-      if (remaining <= 0) {
-        break;
+          toolName: task.toolName,
+          error
+        });
+        this.dependencies.eventBus.emit({
+          name: "runtime.task.error",
+          payload: {
+            runtimeId: this.runtimeId,
+            taskId: task.taskId,
+            agentId: task.agentId,
+            toolName: task.toolName,
+            error
+          }
+        });
+        throw error;
+      } finally {
+        this.inFlightTasks.delete(task.taskId);
+        this.inFlightPromises.delete(task.taskId);
       }
-      await this.sleep(Math.min(5, remaining));
-    }
+    })();
+
+    this.inFlightPromises.set(task.taskId, taskPromise);
+    return taskPromise;
   }
 
-  private sleep(milliseconds: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, milliseconds));
+  private async awaitInFlightTasks(timeoutMs: number): Promise<void> {
+    const promises = Array.from(this.inFlightPromises.values());
+    if (promises.length === 0) {
+      return;
+    }
+
+    const timeout = new Promise<void>((resolve) => {
+      setTimeout(resolve, timeoutMs);
+    });
+
+    await Promise.race([Promise.all(promises), timeout]);
   }
 }

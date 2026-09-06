@@ -10,19 +10,19 @@ describe("InMemoryMemoryStore property-based tests", () => {
   const taskIdArb = fc.string({ minLength: 1, maxLength: 20 });
   const inputArb = fc.string();
   const outputArb = fc.anything();
-  // Constrain date range to valid ECMAScript range for toISOString()
-  // Date range: 0 (1970-01-01T00:00:00.000Z) to 8640000000000000 (9999-12-31T23:59:59.999Z)
-  const recordedAtArb = fc.date({
-    min: new Date(0),
-    max: new Date("9999-12-31T23:59:59.999Z")
-  }).map((d) => d.toISOString());
+  // Generate ISO 8601-representable timestamps directly as strings. This
+  // avoids Date.prototype.toISOString() throwing RangeError on dates outside
+  // 0-9999 (which fc.date() can produce).
+  const isoDateStringArb = fc
+    .integer({ min: 0, max: 253402300799000 })
+    .map((ms) => new Date(ms).toISOString());
 
   const entryArb: fc.Arbitrary<MemoryEntry> = fc.record({
     agentId: agentIdArb,
     taskId: taskIdArb,
     input: inputArb,
     output: outputArb,
-    recordedAt: recordedAtArb
+    recordedAt: isoDateStringArb
   });
 
   it("listByAgent returns exactly entries for that agent in append order", async () => {
