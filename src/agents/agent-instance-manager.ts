@@ -12,6 +12,7 @@ export interface AgentInstanceManagerOptions {
 export class AgentInstanceManager {
   private readonly instances = new Map<string, AgentInstance>();
   private readonly maxInstances: number;
+  private evictionCount = 0;
 
   public constructor(options: AgentInstanceManagerOptions = {}) {
     this.maxInstances = options.maxInstances ?? 5_000;
@@ -29,6 +30,7 @@ export class AgentInstanceManager {
       const oldestId = this.instances.keys().next().value;
       if (oldestId !== undefined) {
         this.instances.delete(oldestId);
+        this.evictionCount++;
       }
     }
 
@@ -39,6 +41,10 @@ export class AgentInstanceManager {
 
     this.instances.set(agentId, created);
     return created;
+  }
+
+  public getEvictionCount(): number {
+    return this.evictionCount;
   }
 
   public get(agentId: string): AgentInstance | undefined {

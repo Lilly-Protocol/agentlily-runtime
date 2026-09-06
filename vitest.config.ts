@@ -11,7 +11,8 @@ export default defineConfig({
         "src/runtime/context.ts",
         "src/tasks/task-types.ts",
         "src/providers/model-provider.ts",
-        "src/state/runtime-state.ts"
+        "src/state/runtime-state.ts",
+        "src/**/__tests__/**"
       ],
       thresholds: {
         lines: 85,
