@@ -112,16 +112,12 @@ export class RuntimeEventBus {
     eventName: TName,
     listener: RuntimeEventListener<TName>
   ): () => void {
-    let unsubscribe: () => void = () => undefined;
-    const wrapped: RuntimeEventListener<TName> & { originalListener?: Listener } = (
-      event
-    ) => {
-      unsubscribe();
-      listener(event);
+    const wrapped: RuntimeEventListener<TName> = (event) => {
+      this.off(eventName, wrapped);
+      return listener(event);
     };
-    wrapped.originalListener = listener as Listener;
-    unsubscribe = this.on(eventName, wrapped);
-    return unsubscribe;
+    this.on(eventName, wrapped);
+    return () => this.off(eventName, wrapped);
   }
 
   public off<TName extends RuntimeEventName>(
