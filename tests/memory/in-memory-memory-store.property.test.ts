@@ -10,14 +10,19 @@ describe("InMemoryMemoryStore property-based tests", () => {
   const taskIdArb = fc.string({ minLength: 1, maxLength: 20 });
   const inputArb = fc.string();
   const outputArb = fc.anything();
-  const recordedAtArb = fc.date().map((d) => d.toISOString());
+  // Generate ISO 8601-representable timestamps directly as strings. This
+  // avoids Date.prototype.toISOString() throwing RangeError on dates outside
+  // 0-9999 (which fc.date() can produce).
+  const isoDateStringArb = fc
+    .integer({ min: 0, max: 253402300799000 })
+    .map((ms) => new Date(ms).toISOString());
 
   const entryArb: fc.Arbitrary<MemoryEntry> = fc.record({
     agentId: agentIdArb,
     taskId: taskIdArb,
     input: inputArb,
     output: outputArb,
-    recordedAt: recordedAtArb
+    recordedAt: isoDateStringArb
   });
 
   it("listByAgent returns exactly entries for that agent in append order", async () => {
