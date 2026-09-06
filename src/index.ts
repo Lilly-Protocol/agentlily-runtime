@@ -7,11 +7,18 @@ export type { RuntimeStopOptions } from "./runtime/agent-runtime.js";
 
 export {
   AgentInstanceManager,
+  DEFAULT_MAX_AGENT_INSTANCES,
   type AgentInstanceManagerOptions
 } from "./agents/agent-instance-manager.js";
-export { ActionExecutor } from "./actions/action-executor.js";
+export {
+  ActionExecutor,
+  type ActionExecutorOptions
+} from "./actions/action-executor.js";
 export { RuntimeError } from "./errors/runtime-errors.js";
-export { RuntimeEventBus } from "./events/runtime-events.js";
+export {
+  RuntimeEventBus,
+  RuntimeEventListenerLimitError
+} from "./events/runtime-events.js";
 export {
   assertMaxToolCalls,
   assertNonEmptyValue,
@@ -50,11 +57,14 @@ export type {
 } from "./events/runtime-events.js";
 export type {
   ConsoleRuntimeLoggerOptions,
+  InMemoryRuntimeLoggerOptions,
   RuntimeLogger,
   RuntimeLogLevel
 } from "./logger/runtime-logger.js";
 export type {
   InMemoryMemoryStoreOptions,
+  JsonFileMemoryStoreOptions,
+  ListMemoryOptions,
   MemoryEntry,
   MemoryStore
 } from "./memory/memory-store.js";

@@ -48,4 +48,221 @@ describe("InMemoryRuntimeStateStore put/get round trips", () => {
     expect(await store.get<string>("b")).toBe("beta");
     expect(await store.get<string>("c")).toBe("gamma");
   });
+
+  it("lists keys in insertion order and removes deleted keys", async () => {
+    const store = new InMemoryRuntimeStateStore();
+    await store.put("first", 1);
+    await store.put("second", 2);
+
+    expect(await store.keys()).toEqual(["first", "second"]);
+    expect(await store.has("first")).toBe(true);
+    expect(await store.delete("first")).toBe(true);
+    expect(await store.keys()).toEqual(["second"]);
+  });
+
+  it("evicts the oldest key at capacity but not when replacing a key", async () => {
+    const store = new InMemoryRuntimeStateStore({ maxEntries: 2 });
+    await store.put("first", 1);
+    await store.put("second", 2);
+    await store.put("first", 10);
+
+    expect(await store.keys()).toEqual(["first", "second"]);
+
+    await store.put("third", 3);
+    expect(await store.keys()).toEqual(["second", "third"]);
+    expect(await store.get("first")).toBeUndefined();
+  });
+
+  it("supports an explicitly unbounded store and clear", async () => {
+    const store = new InMemoryRuntimeStateStore({ maxEntries: 0 });
+    await store.put("first", 1);
+    await store.put("second", 2);
+
+    expect(await store.size()).toBe(2);
+    await store.clear();
+    expect(await store.keys()).toEqual([]);
+  });
+});
+
+describe("InMemoryRuntimeStateStore maxEntries FIFO eviction and optional methods", () => {
+  it("evicts oldest-inserted keys in FIFO order when maxEntries capacity is exceeded", async () => {
+    const store = new InMemoryRuntimeStateStore({ maxEntries: 3 });
+
+    await store.put("key1", "val1");
+    await store.put("key2", "val2");
+    await store.put("key3", "val3");
+
+    expect(await store.size()).toBe(3);
+    expect(await store.keys()).toEqual(["key1", "key2", "key3"]);
+
+    // Overflowing with a 4th key evicts the oldest key (key1)
+    await store.put("key4", "val4");
+
+    expect(await store.size()).toBe(3);
+    expect(await store.has("key1")).toBe(false);
+    expect(await store.get("key1")).toBeUndefined();
+    expect(await store.has("key2")).toBe(true);
+    expect(await store.has("key3")).toBe(true);
+    expect(await store.has("key4")).toBe(true);
+    expect(await store.keys()).toEqual(["key2", "key3", "key4"]);
+
+    // Overwriting an existing key at capacity does not trigger eviction
+    await store.put("key2", "val2-updated");
+    expect(await store.size()).toBe(3);
+    expect(await store.get("key2")).toBe("val2-updated");
+    expect(await store.has("key3")).toBe(true);
+    expect(await store.has("key4")).toBe(true);
+
+    // Overflowing with a 5th key evicts key2 (since Map.set on existing key preserves insertion order)
+    await store.put("key5", "val5");
+    expect(await store.size()).toBe(3);
+    expect(await store.has("key2")).toBe(false);
+    expect(await store.get("key2")).toBeUndefined();
+    expect(await store.has("key3")).toBe(true);
+    expect(await store.has("key4")).toBe(true);
+    expect(await store.has("key5")).toBe(true);
+    expect(await store.keys()).toEqual(["key3", "key4", "key5"]);
+  });
+
+  it("returns true when deleting existing keys and false when deleting missing keys", async () => {
+    const store = new InMemoryRuntimeStateStore();
+    await store.put("existingKey", "data");
+
+    expect(await store.has("existingKey")).toBe(true);
+    const deleteSuccess = await store.delete("existingKey");
+    expect(deleteSuccess).toBe(true);
+    expect(await store.has("existingKey")).toBe(false);
+    expect(await store.get("existingKey")).toBeUndefined();
+    expect(await store.size()).toBe(0);
+
+    // Deleting already deleted or missing key returns false
+    const deleteMissing = await store.delete("existingKey");
+    expect(deleteMissing).toBe(false);
+
+    const deleteNeverExisted = await store.delete("nonExistentKey");
+    expect(deleteNeverExisted).toBe(false);
+  });
+
+  it("returns consistent results for has(), keys(), size(), and clear() across state transitions", async () => {
+    const store = new InMemoryRuntimeStateStore();
+
+    expect(await store.size()).toBe(0);
+    expect(await store.keys()).toEqual([]);
+    expect(await store.has("alpha")).toBe(false);
+
+    await store.put("alpha", 100);
+    await store.put("beta", 200);
+
+    expect(await store.size()).toBe(2);
+    expect(await store.has("alpha")).toBe(true);
+    expect(await store.has("beta")).toBe(true);
+    expect(await store.has("gamma")).toBe(false);
+    expect(await store.keys()).toEqual(["alpha", "beta"]);
+
+    // Delete one item
+    await store.delete("alpha");
+    expect(await store.size()).toBe(1);
+    expect(await store.has("alpha")).toBe(false);
+    expect(await store.has("beta")).toBe(true);
+    expect(await store.keys()).toEqual(["beta"]);
+
+    // Clear all
+    await store.clear();
+    expect(await store.size()).toBe(0);
+    expect(await store.keys()).toEqual([]);
+    expect(await store.has("beta")).toBe(false);
+    expect(await store.get("beta")).toBeUndefined();
+  });
+});
+
+describe("InMemoryRuntimeStateStore maxEntries FIFO eviction and optional methods", () => {
+  it("evicts oldest keys in FIFO order when maxEntries capacity is exceeded", async () => {
+    const store = new InMemoryRuntimeStateStore({ maxEntries: 3 });
+
+    await store.put("k1", "v1");
+    await store.put("k2", "v2");
+    await store.put("k3", "v3");
+
+    expect(await store.size()).toBe(3);
+    expect(await store.keys()).toEqual(["k1", "k2", "k3"]);
+
+    // Adding 4th key should evict oldest (k1)
+    await store.put("k4", "v4");
+
+    expect(await store.size()).toBe(3);
+    expect(await store.get("k1")).toBeUndefined();
+    expect(await store.has("k1")).toBe(false);
+    expect(await store.get("k2")).toBe("v2");
+    expect(await store.get("k3")).toBe("v3");
+    expect(await store.get("k4")).toBe("v4");
+    expect(await store.keys()).toEqual(["k2", "k3", "k4"]);
+
+    // Adding 5th key should evict k2
+    await store.put("k5", "v5");
+    expect(await store.size()).toBe(3);
+    expect(await store.get("k2")).toBeUndefined();
+    expect(await store.has("k2")).toBe(false);
+    expect(await store.keys()).toEqual(["k3", "k4", "k5"]);
+  });
+
+  it("updating an existing key does not evict other keys even if store is at capacity", async () => {
+    const store = new InMemoryRuntimeStateStore({ maxEntries: 2 });
+
+    await store.put("k1", "v1");
+    await store.put("k2", "v2");
+    expect(await store.size()).toBe(2);
+
+    // Update existing k1
+    await store.put("k1", "v1-updated");
+    expect(await store.size()).toBe(2);
+    expect(await store.get("k1")).toBe("v1-updated");
+    expect(await store.get("k2")).toBe("v2");
+    expect(await store.has("k1")).toBe(true);
+    expect(await store.has("k2")).toBe(true);
+  });
+
+  it("delete returns true for existing keys and false for missing keys", async () => {
+    const store = new InMemoryRuntimeStateStore();
+
+    await store.put("keyA", 123);
+    expect(await store.has("keyA")).toBe(true);
+
+    const deleted = await store.delete("keyA");
+    expect(deleted).toBe(true);
+    expect(await store.has("keyA")).toBe(false);
+    expect(await store.get("keyA")).toBeUndefined();
+    expect(await store.size()).toBe(0);
+
+    const deletedMissing = await store.delete("keyA");
+    expect(deletedMissing).toBe(false);
+
+    const deletedNeverExisted = await store.delete("never-existed");
+    expect(deletedNeverExisted).toBe(false);
+  });
+
+  it("has, keys, size, and clear reflect state transitions correctly", async () => {
+    const store = new InMemoryRuntimeStateStore();
+
+    expect(await store.size()).toBe(0);
+    expect(await store.keys()).toEqual([]);
+    expect(await store.has("x")).toBe(false);
+
+    await store.put("x", 1);
+    await store.put("y", 2);
+
+    expect(await store.size()).toBe(2);
+    expect(await store.has("x")).toBe(true);
+    expect(await store.has("y")).toBe(true);
+    expect(await store.has("z")).toBe(false);
+    expect(await store.keys()).toEqual(["x", "y"]);
+
+    await store.clear();
+
+    expect(await store.size()).toBe(0);
+    expect(await store.keys()).toEqual([]);
+    expect(await store.has("x")).toBe(false);
+    expect(await store.has("y")).toBe(false);
+    expect(await store.get("x")).toBeUndefined();
+    expect(await store.get("y")).toBeUndefined();
+  });
 });
