@@ -77,3 +77,34 @@ describe("TaskRunner INVALID_TASK rejection paths", () => {
     }
   });
 });
+
+describe("TaskRunner unexpected tool failure wrapping", () => {
+  it("wraps plain Error from tool execute as EXECUTION_FAILED", async () => {
+    const failingExecutor = {
+      execute: async () => {
+        throw new Error("boom");
+      }
+    };
+    const noopStore = { append: async () => {}, listByAgent: async () => [] };
+    const runner = new TaskRunner(failingExecutor as any, noopStore as any);
+
+    try {
+      await runner.run(
+        {
+          taskId: "task-5",
+          agentId: "agent-1",
+          toolName: "explode",
+          input: "Trigger failure",
+          payload: {}
+        },
+        {} as any
+      );
+      expect.fail("should have thrown");
+    } catch (e) {
+      const err = e as RuntimeError;
+      expect(err.code).toBe("EXECUTION_FAILED");
+      expect(err.message).toBe("boom");
+      expect(err.details?.cause).toBe("boom");
+    }
+  });
+});
