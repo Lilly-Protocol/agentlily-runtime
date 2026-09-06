@@ -102,6 +102,62 @@ const result = await runtime.executeTask({
 console.log(result.output);
 ```
 
+## Runtime Events
+
+`agentlily-runtime` exposes an event system via `RuntimeEventBus` to support observability, audit logs, and tracing adapters.
+
+### Event Catalog (`RuntimeEventMap`)
+
+| Event Name               | Description                                              | Key Payload Fields                                         |
+| :----------------------- | :------------------------------------------------------- | :--------------------------------------------------------- |
+| `runtime.started`        | Emitted once when `runtime.start()` succeeds             | `runtimeId`, `occurredAt`                                  |
+| `runtime.stopped`        | Emitted when `runtime.stop()` completes                  | `runtimeId`, `occurredAt`                                  |
+| `runtime.task.received`  | Emitted when a task is accepted for execution            | `runtimeId`, `taskId`, `agentId`                           |
+| `runtime.task.completed` | Emitted when a task executes successfully                | `runtimeId`, `taskId`, `agentId`, `toolName`, `durationMs` |
+| `runtime.task.failed`    | Emitted when task execution fails                        | `runtimeId`, `taskId`, `agentId`, `reason`                 |
+| `runtime.tool.invoked`   | Emitted when an individual tool action is invoked        | `runtimeId`, `taskId`, `agentId`, `toolName`, `invokedAt`  |
+| `runtime.internal.error` | Emitted when an event listener throws an unhandled error | `eventName`, `errorMessage`, `occurredAt`                  |
+
+### Subscribing to Events
+
+You can inject a custom `RuntimeEventBus` during initialization or subscribe directly via `runtime.eventBus`:
+
+```ts
+import {
+  AgentRuntime,
+  RuntimeEventBus
+} from "@lily-protocol/agentlily-runtime";
+
+const eventBus = new RuntimeEventBus();
+
+// Subscribe to task completion and failure events
+const unsubscribeCompleted = eventBus.on("runtime.task.completed", (event) => {
+  console.log(
+    `Task ${event.payload.taskId} completed in ${event.payload.durationMs}ms`
+  );
+});
+
+const unsubscribeFailed = eventBus.on("runtime.task.failed", (event) => {
+  console.error(`Task ${event.payload.taskId} failed: ${event.payload.reason}`);
+});
+
+// Single-fire listener
+eventBus.once("runtime.started", (event) => {
+  console.log(`Runtime started at ${event.payload.occurredAt}`);
+});
+
+const runtime = new AgentRuntime({
+  runtimeId: "monitored-runtime",
+  eventBus
+});
+
+await runtime.start();
+
+// Unsubscribe when no longer needed
+unsubscribeCompleted();
+unsubscribeFailed();
+```
+
 ## Scripts
 
 - `npm run build` compiles the library
