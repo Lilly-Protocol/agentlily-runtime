@@ -192,4 +192,84 @@ describe("AgentRuntime", () => {
     await runtime.stop();
     expect(stoppedEvents).toHaveLength(1);
   });
+
+  it("rejects invalid task fields before emitting task.received or task.failed", async () => {
+    const eventBus = new RuntimeEventBus();
+    const emittedEvents: string[] = [];
+    eventBus.on("runtime.task.received", () => {
+      emittedEvents.push("runtime.task.received");
+    });
+    eventBus.on("runtime.task.failed", () => {
+      emittedEvents.push("runtime.task.failed");
+    });
+
+    const runtime = new AgentRuntime({
+      runtimeId: "runtime-invalid-task-fields",
+      eventBus
+    });
+    await runtime.start();
+
+    // Empty taskId throws INVALID_TASK without emitting received or failed events
+    await expect(
+      runtime.executeTask({
+        taskId: "",
+        agentId: "agent-1",
+        toolName: "echo",
+        input: "Test input",
+        payload: {}
+      })
+    ).rejects.toMatchObject({
+      name: "RuntimeError",
+      code: "INVALID_TASK",
+      details: { fieldName: "taskId" }
+    });
+
+    // Whitespace agentId throws INVALID_TASK
+    await expect(
+      runtime.executeTask({
+        taskId: "task-1",
+        agentId: "   ",
+        toolName: "echo",
+        input: "Test input",
+        payload: {}
+      })
+    ).rejects.toMatchObject({
+      name: "RuntimeError",
+      code: "INVALID_TASK",
+      details: { fieldName: "agentId" }
+    });
+
+    // Empty toolName throws INVALID_TASK
+    await expect(
+      runtime.executeTask({
+        taskId: "task-1",
+        agentId: "agent-1",
+        toolName: "",
+        input: "Test input",
+        payload: {}
+      })
+    ).rejects.toMatchObject({
+      name: "RuntimeError",
+      code: "INVALID_TASK",
+      details: { fieldName: "toolName" }
+    });
+
+    // Blank input throws INVALID_TASK
+    await expect(
+      runtime.executeTask({
+        taskId: "task-1",
+        agentId: "agent-1",
+        toolName: "echo",
+        input: "   ",
+        payload: {}
+      })
+    ).rejects.toMatchObject({
+      name: "RuntimeError",
+      code: "INVALID_TASK",
+      details: { fieldName: "input" }
+    });
+
+    // Zero lifecycle events emitted
+    expect(emittedEvents).toEqual([]);
+  });
 });

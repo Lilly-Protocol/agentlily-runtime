@@ -9,12 +9,16 @@ export interface AgentInstanceManagerOptions {
   maxInstances?: number;
 }
 
+/** Default capacity for agent instances when no override is provided. */
+export const DEFAULT_MAX_AGENT_INSTANCES = 5_000;
+
 export class AgentInstanceManager {
   private readonly instances = new Map<string, AgentInstance>();
   private readonly maxInstances: number;
+  private evictionCount = 0;
 
   public constructor(options: AgentInstanceManagerOptions = {}) {
-    this.maxInstances = options.maxInstances ?? 5_000;
+    this.maxInstances = options.maxInstances ?? DEFAULT_MAX_AGENT_INSTANCES;
   }
 
   public getOrCreate(agentId: string): AgentInstance {
@@ -29,6 +33,7 @@ export class AgentInstanceManager {
       const oldestId = this.instances.keys().next().value;
       if (oldestId !== undefined) {
         this.instances.delete(oldestId);
+        this.evictionCount++;
       }
     }
 
@@ -39,6 +44,10 @@ export class AgentInstanceManager {
 
     this.instances.set(agentId, created);
     return created;
+  }
+
+  public getEvictionCount(): number {
+    return this.evictionCount;
   }
 
   public get(agentId: string): AgentInstance | undefined {
@@ -59,6 +68,16 @@ export class AgentInstanceManager {
 
   public size(): number {
     return this.instances.size;
+  }
+
+  /** Configured capacity (defaults to {@link DEFAULT_MAX_AGENT_INSTANCES}). */
+  public getMaxInstances(): number {
+    return this.maxInstances;
+  }
+
+  /** Number of oldest-instance evictions performed because the capacity was full. */
+  public getEvictionCount(): number {
+    return this.evictionCount;
   }
 
   public list(): AgentInstance[] {
