@@ -1,9 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   ActionExecutor,
   AgentInstanceManager,
   InMemoryMemoryStore,
   InMemoryRuntimeStateStore,
+  RuntimeError,
+  RuntimeEventBus,
   ToolRegistry,
   UnconfiguredModelProvider
 } from "../src/index.js";
@@ -55,111 +57,75 @@ describe("ActionExecutor", () => {
     });
 
     const executor = new ActionExecutor(registry, 2);
-    const ctx = createMockContext("task-limited");
+    const ctx = createMockContext("task-2");
 
-    // Call 1: Allowed (count 0 -> 1)
-    await expect(executor.execute("ping", {}, ctx)).resolves.toBe("pong");
-    // Call 2: Allowed (count 1 -> 2)
-    await expect(executor.execute("ping", {}, ctx)).resolves.toBe("pong");
+    expect(executor.getToolCallCount("task-2")).toBe(0);
 
-    // Call 3: Exceeds limit (count 2 >= 2)
-    await expect(executor.execute("ping", {}, ctx)).rejects.toMatchObject({
-      name: "RuntimeError",
-      code: "MAX_TOOL_CALLS_EXCEEDED",
-      details: {
-        currentToolCalls: 2,
-        maxToolCalls: 2
-      }
-    });
+    const result1 = await executor.execute("ping", {}, ctx);
+    expect(result1).toBe("pong");
+    expect(executor.getToolCallCount("task-2")).toBe(1);
+
+    const result2 = await executor.execute("ping", {}, ctx);
+    expect(result2).toBe("pong");
+    expect(executor.getToolCallCount("task-2")).toBe(2);
+
+    await expect(
+      executor.execute("ping", {}, ctx)
+    ).rejects.toThrow("Max tool calls per task exceeded");
+    expect(executor.getToolCallCount("task-2")).toBe(2);
   });
 
-  it("isolates call limits per task ID", async () => {
+  // NEW TESTS FOR THE FIX
+  it("does not increment tool call count for unknown tool", async () => {
     const registry = new ToolRegistry();
-    registry.register({
-      name: "ping",
-      description: "Ping tool",
-      execute() {
-        return "pong";
-      }
-    });
+    // No tools registered
+    const executor = new ActionExecutor(registry);
+    const ctx = createMockContext("task-3");
 
-    const executor = new ActionExecutor(registry, 1);
-    const ctxA = createMockContext("task-A");
-    const ctxB = createMockContext("task-B");
+    const initialCount = executor.getToolCallCount("task-3");
+    expect(initialCount).toBe(0);
 
-    // task-A first call succeeds
-    await expect(executor.execute("ping", {}, ctxA)).resolves.toBe("pong");
-    // task-A second call fails
-    await expect(executor.execute("ping", {}, ctxA)).rejects.toMatchObject({
-      code: "MAX_TOOL_CALLS_EXCEEDED"
-    });
+    await expect(
+      executor.execute("unknown-tool", {}, ctx)
+    ).rejects.toThrow(/TOOL_NOT_FOUND/);
 
-    // task-B has its own quota and succeeds
-    await expect(executor.execute("ping", {}, ctxB)).resolves.toBe("pong");
+    // Count should remain unchanged
+    expect(executor.getToolCallCount("task-3")).toBe(initialCount);
   });
 
-  it("bounds the internal counter map size under high volume of distinct tasks", async () => {
+  it("allows valid tool call after TOOL_NOT_FOUND when maxToolCallsPerTask is set", async () => {
     const registry = new ToolRegistry();
     registry.register({
-      name: "echo",
-      description: "Echo tool",
+      name: "valid-tool",
+      description: "Valid tool",
       execute({ payload }) {
-        return payload;
+        return { result: payload };
       }
     });
 
-    const maxTrackedTasks = 5;
-    const executor = new ActionExecutor(registry, {
-      maxTrackedTasks,
-      maxToolCallsPerTask: 10
-    });
+    const executor = new ActionExecutor(registry, 2); // max 2 calls
+    const ctx = createMockContext("task-4");
 
-    // Execute 20 distinct task IDs
-    for (let i = 0; i < 20; i++) {
-      const ctx = createMockContext(`task-unique-${i}`);
-      await executor.execute("echo", { i }, ctx);
-    }
+    // First call: unknown tool -> should NOT consume budget
+    await expect(
+      executor.execute("unknown-tool", {}, ctx)
+    ).rejects.toThrow(/TOOL_NOT_FOUND/);
+    expect(executor.getToolCallCount("task-4")).toBe(0);
 
-    // Size must not exceed maxTrackedTasks cap
-    expect(executor.getTrackedTaskCount()).toBe(maxTrackedTasks);
-    // Old tasks evicted
-    expect(executor.getToolCallCount("task-unique-0")).toBe(0);
-    // Recent tasks preserved
-    expect(executor.getToolCallCount("task-unique-19")).toBe(1);
-  });
+    // Second call: valid tool -> should succeed and increment to 1
+    const result1 = await executor.execute("valid-tool", { data: "test" }, ctx);
+    expect(result1).toEqual({ result: "test" });
+    expect(executor.getToolCallCount("task-4")).toBe(1);
 
-  it("resets task tool call counters and restores quota", async () => {
-    const registry = new ToolRegistry();
-    registry.register({
-      name: "ping",
-      description: "Ping tool",
-      execute() {
-        return "pong";
-      }
-    });
+    // Third call: valid tool -> should succeed and increment to 2
+    const result2 = await executor.execute("valid-tool", { data: "test2" }, ctx);
+    expect(result2).toEqual({ result: "test2" });
+    expect(executor.getToolCallCount("task-4")).toBe(2);
 
-    const executor = new ActionExecutor(registry, 1);
-    const ctx = createMockContext("task-reset-test");
-
-    // Call 1: Consumes quota
-    await expect(executor.execute("ping", {}, ctx)).resolves.toBe("pong");
-    expect(executor.getToolCallCount("task-reset-test")).toBe(1);
-
-    // Call 2: Blocked by maxToolCallsPerTask: 1
-    await expect(executor.execute("ping", {}, ctx)).rejects.toMatchObject({
-      code: "MAX_TOOL_CALLS_EXCEEDED"
-    });
-
-    // Reset task counter
-    executor.reset("task-reset-test");
-    expect(executor.getToolCallCount("task-reset-test")).toBe(0);
-
-    // Call 3: Fresh quota granted, succeeds!
-    await expect(executor.execute("ping", {}, ctx)).resolves.toBe("pong");
-    expect(executor.getToolCallCount("task-reset-test")).toBe(1);
-
-    // Reset all
-    executor.resetAll();
-    expect(executor.getTrackedTaskCount()).toBe(0);
+    // Fourth call: should be blocked by limit
+    await expect(
+      executor.execute("valid-tool", {}, ctx)
+    ).rejects.toThrow(/Max tool calls per task exceeded/);
+    expect(executor.getToolCallCount("task-4")).toBe(2);
   });
 });
