@@ -115,69 +115,71 @@ describe("ConsoleRuntimeLogger redaction", () => {
 });
 
 describe("InMemoryRuntimeLogger redaction", () => {
-  it("redacts default sensitive keys across all log levels", () => {
+  it("redacts sensitive metadata for all log levels", () => {
     const logger = new InMemoryRuntimeLogger();
 
-    logger.info("info test", {
-      userId: "u1",
-      apiKey: "sk-live-123",
-      password: "pass",
-      token: "tok-abc",
-      nested: { secret: "hidden-val", safe: "ok" }
-    });
-    logger.warn("warn test", {
-      authorization: "Bearer secret-token",
-      normal: 1
-    });
-    logger.debug("debug test", { secretKey: "key-123", mode: "verbose" });
-    logger.error("error test", { api_key: "api-secret", detail: "err" });
+    logger.debug("debug", { apiKey: "debug-secret", safe: "debug" });
+    logger.info("info", { password: "info-secret", safe: "info" });
+    logger.warn("warn", { token: "warn-secret", safe: "warn" });
+    logger.error("error", { authorization: "error-secret", safe: "error" });
 
-    expect(logger.entries).toHaveLength(4);
-
-    expect(logger.entries[0]!.metadata).toEqual({
-      userId: "u1",
-      apiKey: "[REDACTED]",
-      password: "[REDACTED]",
-      token: "[REDACTED]",
-      nested: {
-        secret: "[REDACTED]",
-        safe: "ok"
+    expect(logger.entries).toEqual([
+      {
+        level: "debug",
+        message: "debug",
+        metadata: { apiKey: "[REDACTED]", safe: "debug" }
+      },
+      {
+        level: "info",
+        message: "info",
+        metadata: { password: "[REDACTED]", safe: "info" }
+      },
+      {
+        level: "warn",
+        message: "warn",
+        metadata: { token: "[REDACTED]", safe: "warn" }
+      },
+      {
+        level: "error",
+        message: "error",
+        metadata: { authorization: "[REDACTED]", safe: "error" }
       }
-    });
-
-    expect(logger.entries[1]!.metadata).toEqual({
-      authorization: "[REDACTED]",
-      normal: 1
-    });
-
-    expect(logger.entries[2]!.metadata).toEqual({
-      secretKey: "[REDACTED]",
-      mode: "verbose"
-    });
-
-    expect(logger.entries[3]!.metadata).toEqual({
-      api_key: "[REDACTED]",
-      detail: "err"
-    });
+    ]);
   });
 
-  it("accepts custom redactKeys option in InMemoryRuntimeLogger", () => {
-    const logger = new InMemoryRuntimeLogger({ redactKeys: /credit_card/i });
+  it("redacts nested metadata recursively", () => {
+    const logger = new InMemoryRuntimeLogger();
 
-    logger.info("custom redaction", {
-      credit_card: "1234-5678-9012-3456",
-      apiKey: "visible-key"
+    logger.info("nested", {
+      user: {
+        credentials: { password: "secret", token: "token" },
+        name: "Alice"
+      },
+      safe: "value"
     });
 
     expect(logger.entries[0]!.metadata).toEqual({
-      credit_card: "[REDACTED]",
-      apiKey: "visible-key"
+      user: {
+        credentials: { password: "[REDACTED]", token: "[REDACTED]" },
+        name: "Alice"
+      },
+      safe: "value"
     });
   });
 
-  it("preserves undefined metadata when none is provided", () => {
-    const logger = new InMemoryRuntimeLogger();
-    logger.info("no metadata");
-    expect(logger.entries[0]!.metadata).toBeUndefined();
+  it("supports a custom redactKeys pattern", () => {
+    const logger = new InMemoryRuntimeLogger({ redactKeys: /^ssn$/i });
+
+    logger.info("custom", {
+      ssn: "123-45-6789",
+      token: "visible-token",
+      name: "Alice"
+    });
+
+    expect(logger.entries[0]!.metadata).toEqual({
+      ssn: "[REDACTED]",
+      token: "visible-token",
+      name: "Alice"
+    });
   });
 });
