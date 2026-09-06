@@ -25,7 +25,7 @@ The current implementation demonstrates a narrow, credible runtime path:
 3. Build a runtime context for a task
 4. Execute a task through the task runner and action executor
 5. Invoke a typed tool
-6. Persist lightweight in-memory task history
+6. Persist lightweight in-memory task history (or durable JSON file history via memoryStoragePath)
 7. Emit runtime events and structured log entries
 
 This gives contributors a working reference path without locking the project
@@ -37,7 +37,7 @@ The following areas are scaffolded with interfaces, types, or placeholders and
 are expected to become contributor work:
 
 - Wallet-aware and payment-aware actions
-- Persistent memory and state backends
+- Persistent database and vector storage backends (basic file-based JSON persistence is supported via JsonFileMemoryStore)
 - Model provider integrations (an `OpenAICompatibleModelProvider` scaffold is available for experimentation; note that it is scaffolded and intentionally not production-complete)
 - Runtime policy engines and approval flows
 - Long-running orchestration and scheduling
@@ -101,6 +101,53 @@ const result = await runtime.executeTask({
 
 console.log(result.output);
 ```
+
+### Durable Memory via JsonFileMemoryStore
+
+By default, `AgentRuntime` uses `InMemoryMemoryStore`. For durable file-backed persistence across process restarts, pass `memoryStoragePath`:
+
+```ts
+import { AgentRuntime } from "@lily-protocol/agentlily-runtime";
+
+const runtime = new AgentRuntime({
+  runtimeId: "local-dev",
+  memoryStoragePath: "./data/task-history.json"
+});
+```
+
+When `memoryStoragePath` is configured, runtime bootstrap initializes a `JsonFileMemoryStore` targeting that file path.
+
+#### Persisted Entry Shape
+
+Entries are stored as a JSON array of `MemoryEntry` objects formatted with 2-space indentation:
+
+```json
+[
+  {
+    "agentId": "agent-demo",
+    "taskId": "task-001",
+    "input": "Send a greeting",
+    "output": {
+      "echoed": "hello lily"
+    },
+    "recordedAt": "2026-09-06T07:20:00.000Z"
+  }
+]
+```
+
+Each `MemoryEntry` includes:
+
+- `agentId` (`string`): Identifier of the agent executing the task
+- `taskId` (`string`): Unique task execution identifier
+- `input` (`string`): Task input string or instruction
+- `output` (`unknown`): Tool execution output payload returned by the action executor
+- `recordedAt` (`string`): ISO 8601 timestamp when the entry was recorded
+
+#### Known Caveats & Limitations
+
+- **Whole-file rewrite on each append**: `JsonFileMemoryStore` serializes and rewrites the entire JSON file on every `append()`. This is suitable for development and lightweight single-agent runs, but not high-throughput production workloads.
+- **No capacity limit**: Unlike `InMemoryMemoryStore` (which enforces `maxEntries` and `maxEntriesPerAgent`), `JsonFileMemoryStore` currently has no bounding or eviction policy; the file grows unbounded until cleared.
+- **Single-process concurrency**: No cross-process file locking is implemented. Concurrent writes from multiple runtime processes to the same path may result in lost updates.
 
 ## Scripts
 
