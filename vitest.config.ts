@@ -7,11 +7,13 @@ export default defineConfig({
       reporter: ["text", "html"],
       include: ["src/**/*.ts"],
       exclude: [
+        "src/**/__tests__/**",
         "src/**/types.ts",
         "src/runtime/context.ts",
         "src/tasks/task-types.ts",
         "src/providers/model-provider.ts",
-        "src/state/runtime-state.ts"
+        "src/state/runtime-state.ts",
+        "src/**/__tests__/**"
       ],
       thresholds: {
         lines: 85,
