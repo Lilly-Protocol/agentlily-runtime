@@ -26,7 +26,8 @@ export class TaskRunner {
     const startTime = performance.now();
     const startedAt = new Date().toISOString();
 
-    // Tool execution errors propagate untouched so callers observe the original failure.
+    // Tool execution errors are part of the tool contract and must propagate
+    // unchanged so callers retain the original error identity and code.
     const output = await this.actionExecutor.execute<TPayload, TResult>(
       task.toolName,
       task.payload,
@@ -46,9 +47,8 @@ export class TaskRunner {
         recordedAt: completedAt
       });
     } catch (error) {
-      if (error instanceof RuntimeError) {
-        throw error;
-      }
+      // Persistence failures are runtime execution failures even when the
+      // underlying store happens to throw a typed RuntimeError of its own.
       throw new RuntimeError(
         "EXECUTION_FAILED",
         error instanceof Error ? error.message : "Task execution failed.",

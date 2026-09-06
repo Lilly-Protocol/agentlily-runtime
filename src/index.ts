@@ -7,6 +7,7 @@ export type { RuntimeStopOptions } from "./runtime/agent-runtime.js";
 
 export {
   AgentInstanceManager,
+  DEFAULT_MAX_AGENT_INSTANCES,
   type AgentInstanceManagerOptions
 } from "./agents/agent-instance-manager.js";
 export { ActionExecutor } from "./actions/action-executor.js";
@@ -50,11 +51,14 @@ export type {
 } from "./events/runtime-events.js";
 export type {
   ConsoleRuntimeLoggerOptions,
+  InMemoryRuntimeLoggerOptions,
   RuntimeLogger,
   RuntimeLogLevel
 } from "./logger/runtime-logger.js";
 export type {
   InMemoryMemoryStoreOptions,
+  JsonFileMemoryStoreOptions,
+  ListMemoryOptions,
   MemoryEntry,
   MemoryStore
 } from "./memory/memory-store.js";
