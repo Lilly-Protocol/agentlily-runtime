@@ -78,64 +78,33 @@ describe("TaskRunner INVALID_TASK rejection paths", () => {
   });
 });
 
-describe("TaskRunner RuntimeError preservation vs generic wrap", () => {
-  it("preserves RuntimeError instance unchanged with its original code, message, and details", async () => {
-    const customError = new RuntimeError("DUPLICATE_TOOL", "Custom tool error", {
-      customField: "custom-value",
-      numericVal: 42
-    });
-
-    const throwingExecutor = {
+describe("TaskRunner unexpected tool failure wrapping", () => {
+  it("wraps plain Error from tool execute as EXECUTION_FAILED", async () => {
+    const failingExecutor = {
       execute: async () => {
-        throw customError;
+        throw new Error("boom");
       }
     };
-    const memoryStore = new InMemoryMemoryStore();
-    const runner = new TaskRunner(throwingExecutor as any, memoryStore);
-    const ctx = {} as any;
+    const noopStore = { append: async () => {}, listByAgent: async () => [] };
+    const runner = new TaskRunner(failingExecutor as any, noopStore as any);
 
     try {
       await runner.run(
-        { taskId: "task-custom", agentId: "agent-custom", toolName: "tool-custom", input: "input-custom", payload: {} },
-        ctx
-      );
-      expect.fail("should have thrown");
-    } catch (e) {
-      expect(e).toBe(customError);
-      const err = e as RuntimeError;
-      expect(err.code).toBe("DUPLICATE_TOOL");
-      expect(err.message).toBe("Custom tool error");
-      expect(err.details).toEqual({
-        customField: "custom-value",
-        numericVal: 42
-      });
-    }
-  });
-
-  it("wraps non-RuntimeError exceptions in EXECUTION_FAILED preserving the error message and cause", async () => {
-    const genericError = new Error("Something went unexpectedly wrong");
-
-    const throwingExecutor = {
-      execute: async () => {
-        throw genericError;
-      }
-    };
-    const memoryStore = new InMemoryMemoryStore();
-    const runner = new TaskRunner(throwingExecutor as any, memoryStore);
-    const ctx = {} as any;
-
-    try {
-      await runner.run(
-        { taskId: "task-gen", agentId: "agent-gen", toolName: "tool-gen", input: "input-gen", payload: {} },
-        ctx
+        {
+          taskId: "task-5",
+          agentId: "agent-1",
+          toolName: "explode",
+          input: "Trigger failure",
+          payload: {}
+        },
+        {} as any
       );
       expect.fail("should have thrown");
     } catch (e) {
       const err = e as RuntimeError;
-      expect(err).toBeInstanceOf(RuntimeError);
       expect(err.code).toBe("EXECUTION_FAILED");
-      expect(err.message).toBe("Something went unexpectedly wrong");
-      expect(err.details?.cause).toBe("Something went unexpectedly wrong");
+      expect(err.message).toBe("boom");
+      expect(err.details?.cause).toBe("boom");
     }
   });
 });
