@@ -102,52 +102,61 @@ const result = await runtime.executeTask({
 console.log(result.output);
 ```
 
-### Durable Memory via JsonFileMemoryStore
+## Runtime Events
 
-By default, `AgentRuntime` uses `InMemoryMemoryStore`. For durable file-backed persistence across process restarts, pass `memoryStoragePath`:
+`agentlily-runtime` exposes an event system via `RuntimeEventBus` to support observability, audit logs, and tracing adapters.
+
+### Event Catalog (`RuntimeEventMap`)
+
+| Event Name               | Description                                              | Key Payload Fields                                         |
+| :----------------------- | :------------------------------------------------------- | :--------------------------------------------------------- |
+| `runtime.started`        | Emitted once when `runtime.start()` succeeds             | `runtimeId`, `occurredAt`                                  |
+| `runtime.stopped`        | Emitted when `runtime.stop()` completes                  | `runtimeId`, `occurredAt`                                  |
+| `runtime.task.received`  | Emitted when a task is accepted for execution            | `runtimeId`, `taskId`, `agentId`                           |
+| `runtime.task.completed` | Emitted when a task executes successfully                | `runtimeId`, `taskId`, `agentId`, `toolName`, `durationMs` |
+| `runtime.task.failed`    | Emitted when task execution fails                        | `runtimeId`, `taskId`, `agentId`, `reason`                 |
+| `runtime.tool.invoked`   | Emitted when an individual tool action is invoked        | `runtimeId`, `taskId`, `agentId`, `toolName`, `invokedAt`  |
+| `runtime.internal.error` | Emitted when an event listener throws an unhandled error | `eventName`, `errorMessage`, `occurredAt`                  |
+
+### Subscribing to Events
+
+You can inject a custom `RuntimeEventBus` during initialization or subscribe directly via `runtime.eventBus`:
 
 ```ts
-import { AgentRuntime } from "@lily-protocol/agentlily-runtime";
+import {
+  AgentRuntime,
+  RuntimeEventBus
+} from "@lily-protocol/agentlily-runtime";
+
+const eventBus = new RuntimeEventBus();
+
+// Subscribe to task completion and failure events
+const unsubscribeCompleted = eventBus.on("runtime.task.completed", (event) => {
+  console.log(
+    `Task ${event.payload.taskId} completed in ${event.payload.durationMs}ms`
+  );
+});
+
+const unsubscribeFailed = eventBus.on("runtime.task.failed", (event) => {
+  console.error(`Task ${event.payload.taskId} failed: ${event.payload.reason}`);
+});
+
+// Single-fire listener
+eventBus.once("runtime.started", (event) => {
+  console.log(`Runtime started at ${event.payload.occurredAt}`);
+});
 
 const runtime = new AgentRuntime({
-  runtimeId: "local-dev",
-  memoryStoragePath: "./data/task-history.json"
+  runtimeId: "monitored-runtime",
+  eventBus
 });
+
+await runtime.start();
+
+// Unsubscribe when no longer needed
+unsubscribeCompleted();
+unsubscribeFailed();
 ```
-
-When `memoryStoragePath` is configured, runtime bootstrap initializes a `JsonFileMemoryStore` targeting that file path.
-
-#### Persisted Entry Shape
-
-Entries are stored as a JSON array of `MemoryEntry` objects formatted with 2-space indentation:
-
-```json
-[
-  {
-    "agentId": "agent-demo",
-    "taskId": "task-001",
-    "input": "Send a greeting",
-    "output": {
-      "echoed": "hello lily"
-    },
-    "recordedAt": "2026-09-06T07:20:00.000Z"
-  }
-]
-```
-
-Each `MemoryEntry` includes:
-
-- `agentId` (`string`): Identifier of the agent executing the task
-- `taskId` (`string`): Unique task execution identifier
-- `input` (`string`): Task input string or instruction
-- `output` (`unknown`): Tool execution output payload returned by the action executor
-- `recordedAt` (`string`): ISO 8601 timestamp when the entry was recorded
-
-#### Known Caveats & Limitations
-
-- **Whole-file rewrite on each append**: `JsonFileMemoryStore` serializes and rewrites the entire JSON file on every `append()`. This is suitable for development and lightweight single-agent runs, but not high-throughput production workloads.
-- **No capacity limit**: Unlike `InMemoryMemoryStore` (which enforces `maxEntries` and `maxEntriesPerAgent`), `JsonFileMemoryStore` currently has no bounding or eviction policy; the file grows unbounded until cleared.
-- **Single-process concurrency**: No cross-process file locking is implemented. Concurrent writes from multiple runtime processes to the same path may result in lost updates.
 
 ## Scripts
 
