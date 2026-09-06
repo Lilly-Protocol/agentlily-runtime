@@ -1,6 +1,13 @@
 import { describe, it, expect } from "vitest";
 import { ActionExecutor } from "../../src/actions/action-executor.js";
 import { ToolRegistry } from "../../src/tools/tool-registry.js";
+import {
+  AgentInstanceManager,
+  InMemoryMemoryStore,
+  InMemoryRuntimeStateStore,
+  UnconfiguredModelProvider
+} from "../../src/index.js";
+import type { RuntimeContext } from "../../src/index.js";
 
 describe("ActionExecutor tool dispatch and payload passthrough (Issue #115)", () => {
   it("dispatches to the correct registered tool by name", async () => {
@@ -93,5 +100,89 @@ describe("ActionExecutor tool dispatch and payload passthrough (Issue #115)", ()
     const executor = new ActionExecutor(registry);
     const result = await executor.execute("asyncTool", { x: 5 }, {} as any);
     expect(result).toEqual({ value: 50 });
+  });
+});
+
+describe("ActionExecutor per-task tool call tracking and limits", () => {
+  const createMockContext = (taskId: string): RuntimeContext => ({
+    runtimeId: "test-runtime",
+    taskId,
+    agent: new AgentInstanceManager().getOrCreate("test-agent"),
+    memory: new InMemoryMemoryStore(),
+    modelProvider: new UnconfiguredModelProvider(),
+    state: new InMemoryRuntimeStateStore(),
+    now: new Date().toISOString()
+  });
+
+  it("executes tools and tracks call counts per task", async () => {
+    const registry = new ToolRegistry();
+    registry.register({
+      name: "test-tool",
+      description: "Test tool",
+      execute({ payload }) {
+        return { handled: payload };
+      }
+    });
+
+    const executor = new ActionExecutor(registry);
+    const ctx = createMockContext("task-1");
+
+    expect(executor.getToolCallCount("task-1")).toBe(0);
+
+    const result1 = await executor.execute("test-tool", { count: 1 }, ctx);
+    expect(result1).toEqual({ handled: { count: 1 } });
+    expect(executor.getToolCallCount("task-1")).toBe(1);
+
+    const result2 = await executor.execute("test-tool", { count: 2 }, ctx);
+    expect(result2).toEqual({ handled: { count: 2 } });
+    expect(executor.getToolCallCount("task-1")).toBe(2);
+  });
+
+  it("enforces maxToolCallsPerTask policy limit", async () => {
+    const registry = new ToolRegistry();
+    registry.register({
+      name: "ping",
+      description: "Ping tool",
+      execute() {
+        return "pong";
+      }
+    });
+
+    const executor = new ActionExecutor(registry, 2);
+    const ctx = createMockContext("task-limited");
+
+    await expect(executor.execute("ping", {}, ctx)).resolves.toBe("pong");
+    await expect(executor.execute("ping", {}, ctx)).resolves.toBe("pong");
+
+    await expect(executor.execute("ping", {}, ctx)).rejects.toMatchObject({
+      name: "RuntimeError",
+      code: "MAX_TOOL_CALLS_EXCEEDED",
+      details: {
+        currentToolCalls: 2,
+        maxToolCalls: 2
+      }
+    });
+  });
+
+  it("isolates call limits per task ID", async () => {
+    const registry = new ToolRegistry();
+    registry.register({
+      name: "ping",
+      description: "Ping tool",
+      execute() {
+        return "pong";
+      }
+    });
+
+    const executor = new ActionExecutor(registry, 1);
+    const ctxA = createMockContext("task-A");
+    const ctxB = createMockContext("task-B");
+
+    await expect(executor.execute("ping", {}, ctxA)).resolves.toBe("pong");
+    await expect(executor.execute("ping", {}, ctxA)).rejects.toMatchObject({
+      code: "MAX_TOOL_CALLS_EXCEEDED"
+    });
+
+    await expect(executor.execute("ping", {}, ctxB)).resolves.toBe("pong");
   });
 });

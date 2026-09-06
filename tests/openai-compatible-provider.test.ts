@@ -186,4 +186,102 @@ describe("OpenAICompatibleModelProvider", () => {
       "OpenAI-compatible provider request failed: ECONNREFUSED"
     );
   });
+
+  it.each([null, [], {}, { choices: null }, { choices: {} }, { choices: [] }])(
+    "rejects a successful HTTP response without a non-empty choices array: %j",
+    async (payload) => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        new Response(JSON.stringify(payload), { status: 200 })
+      );
+      const provider = new OpenAICompatibleModelProvider({
+        apiKey: "test-key"
+      });
+
+      await expect(
+        provider.generate({ instructions: "test", input: "test" })
+      ).rejects.toThrowError(
+        "malformed response (HTTP 200): expected a non-empty choices array."
+      );
+    }
+  );
+
+  it.each([
+    null,
+    {},
+    { message: null },
+    { message: {} },
+    { message: { content: null }, finish_reason: "tool_calls" },
+    { message: { content: 123 } }
+  ])("rejects a choice without string message content: %j", async (choice) => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(JSON.stringify({ choices: [choice] }), { status: 200 })
+    );
+    const provider = new OpenAICompatibleModelProvider({ apiKey: "test-key" });
+
+    await expect(
+      provider.generate({ instructions: "test", input: "test" })
+    ).rejects.toThrowError(
+      "malformed response (HTTP 200): expected choices[0].message.content to be a string."
+    );
+  });
+
+  it("preserves an explicitly empty string and completion metadata", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          choices: [{ message: { content: "" }, finish_reason: "stop" }],
+          usage: { total_tokens: 1 }
+        }),
+        { status: 200 }
+      )
+    );
+    const provider = new OpenAICompatibleModelProvider({ apiKey: "test-key" });
+
+    await expect(
+      provider.generate({ instructions: "test", input: "test" })
+    ).resolves.toEqual({
+      outputText: "",
+      metadata: {
+        model: "gpt-4o-mini",
+        finishReason: "stop",
+        usage: { total_tokens: 1 }
+      }
+    });
+  });
+
+  it("wraps malformed JSON with HTTP context and a bounded body excerpt", async () => {
+    const body =
+      "<html>upstream error</html>\n" + "x".repeat(300) + "AFTER_LIMIT";
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(body, { status: 200 })
+    );
+    const provider = new OpenAICompatibleModelProvider({ apiKey: "test-key" });
+
+    const failure = await provider
+      .generate({ instructions: "test", input: "test" })
+      .catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).toBe(
+      `OpenAI-compatible provider returned invalid JSON (HTTP 200): ${JSON.stringify(body.slice(0, 200))}...`
+    );
+    expect((failure as Error).message).not.toContain("AFTER_LIMIT");
+    expect((failure as Error).cause).toBeInstanceOf(SyntaxError);
+  });
+
+  it("preserves HTTP context when reading the successful response body fails", async () => {
+    const bodyFailure = new Error("connection closed during response");
+    const response = new Response("", { status: 200 });
+    vi.spyOn(response, "text").mockRejectedValueOnce(bodyFailure);
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(response);
+    const provider = new OpenAICompatibleModelProvider({ apiKey: "test-key" });
+
+    await expect(
+      provider.generate({ instructions: "test", input: "test" })
+    ).rejects.toMatchObject({
+      message:
+        "OpenAI-compatible provider could not read HTTP 200 response body.",
+      cause: bodyFailure
+    });
+  });
 });
