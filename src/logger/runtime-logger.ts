@@ -48,40 +48,58 @@ function redactValue(value: unknown, redactKeys: RegExp): unknown {
 }
 
 export class ConsoleRuntimeLogger implements RuntimeLogger {
-  private readonly minimumLevel: RuntimeLogLevel;
+  public readonly level: RuntimeLogLevel;
   private readonly redactKeys: RegExp;
 
   public constructor(options: ConsoleRuntimeLoggerOptions = {}) {
-    this.minimumLevel = options.level ?? "info";
+    this.level = options.level ?? "info";
     this.redactKeys = options.redactKeys ?? DEFAULT_REDACT_KEYS;
   }
 
   public info(message: string, metadata?: Record<string, unknown>): void {
-    if (this.shouldLog("info")) {
-      console.info(message, this.prepareMetadata(metadata));
-    }
+    this.emit("info", message, metadata);
   }
 
   public warn(message: string, metadata?: Record<string, unknown>): void {
-    if (this.shouldLog("warn")) {
-      console.warn(message, this.prepareMetadata(metadata));
-    }
+    this.emit("warn", message, metadata);
   }
 
   public debug(message: string, metadata?: Record<string, unknown>): void {
-    if (this.shouldLog("debug")) {
-      console.debug(message, this.prepareMetadata(metadata));
-    }
+    this.emit("debug", message, metadata);
   }
 
   public error(message: string, metadata?: Record<string, unknown>): void {
-    if (this.shouldLog("error")) {
-      console.error(message, this.prepareMetadata(metadata));
+    this.emit("error", message, metadata);
+  }
+
+  private emit(
+    level: RuntimeLogLevel,
+    message: string,
+    metadata?: Record<string, unknown>
+  ): void {
+    if (!this.shouldLog(level)) {
+      return;
+    }
+
+    const prepared = this.prepareMetadata(metadata);
+    switch (level) {
+      case "debug":
+        console.debug(message, prepared);
+        break;
+      case "info":
+        console.info(message, prepared);
+        break;
+      case "warn":
+        console.warn(message, prepared);
+        break;
+      case "error":
+        console.error(message, prepared);
+        break;
     }
   }
 
   private shouldLog(level: RuntimeLogLevel): boolean {
-    return LOG_LEVEL_PRIORITY[level] >= LOG_LEVEL_PRIORITY[this.minimumLevel];
+    return LOG_LEVEL_PRIORITY[level] >= LOG_LEVEL_PRIORITY[this.level];
   }
 
   private prepareMetadata(
@@ -95,10 +113,15 @@ export class ConsoleRuntimeLogger implements RuntimeLogger {
 }
 
 export interface InMemoryRuntimeLoggerOptions {
+  /** Maximum number of entries to retain. Oldest entries are evicted first. Defaults to 5 000. */
   maxEntries?: number;
+  /** Minimum severity level to record. Entries below this level are silently discarded. When omitted, all levels are recorded. */
+  level?: RuntimeLogLevel;
+  /** Regex matched against metadata keys; matching values are replaced with `"[REDACTED]"`. Defaults to `DEFAULT_REDACT_KEYS`. Pass a regex that matches nothing (e.g. `/$^/`) to disable redaction. */
+  redactKeys?: RegExp;
 }
 
-interface InMemoryLogEntry {
+export interface InMemoryLogEntry {
   level: RuntimeLogLevel;
   message: string;
   metadata: Record<string, unknown> | undefined;
@@ -107,25 +130,37 @@ interface InMemoryLogEntry {
 export class InMemoryRuntimeLogger implements RuntimeLogger {
   public readonly entries: InMemoryLogEntry[] = [];
   private readonly maxEntries: number;
+  private readonly minimumLevel: RuntimeLogLevel | undefined;
+  private readonly redactKeys: RegExp;
 
   public constructor(options: InMemoryRuntimeLoggerOptions = {}) {
     this.maxEntries = options.maxEntries ?? 5_000;
+    this.minimumLevel = options.level;
+    this.redactKeys = options.redactKeys ?? DEFAULT_REDACT_KEYS;
   }
 
   public info(message: string, metadata?: Record<string, unknown>): void {
-    this.appendEntry("info", message, metadata);
+    if (this.shouldLog("info")) {
+      this.appendEntry("info", message, metadata);
+    }
   }
 
   public warn(message: string, metadata?: Record<string, unknown>): void {
-    this.appendEntry("warn", message, metadata);
+    if (this.shouldLog("warn")) {
+      this.appendEntry("warn", message, metadata);
+    }
   }
 
   public debug(message: string, metadata?: Record<string, unknown>): void {
-    this.appendEntry("debug", message, metadata);
+    if (this.shouldLog("debug")) {
+      this.appendEntry("debug", message, metadata);
+    }
   }
 
   public error(message: string, metadata?: Record<string, unknown>): void {
-    this.appendEntry("error", message, metadata);
+    if (this.shouldLog("error")) {
+      this.appendEntry("error", message, metadata);
+    }
   }
 
   public clear(): void {
@@ -136,14 +171,29 @@ export class InMemoryRuntimeLogger implements RuntimeLogger {
     return this.entries.length;
   }
 
+  private shouldLog(level: RuntimeLogLevel): boolean {
+    if (this.minimumLevel === undefined) {
+      return true;
+    }
+    return LOG_LEVEL_PRIORITY[level] >= LOG_LEVEL_PRIORITY[this.minimumLevel];
+  }
+
   private appendEntry(
     level: RuntimeLogLevel,
     message: string,
     metadata?: Record<string, unknown>
   ): void {
+    if (!this.shouldLog(level)) {
+      return;
+    }
     if (this.maxEntries > 0 && this.entries.length >= this.maxEntries) {
       this.entries.shift();
     }
-    this.entries.push({ level, message, metadata });
+    const redactedMetadata = metadata
+      ? (redactValue(metadata, this.redactKeys) as
+          | Record<string, unknown>
+          | undefined)
+      : undefined;
+    this.entries.push({ level, message, metadata: redactedMetadata });
   }
 }
