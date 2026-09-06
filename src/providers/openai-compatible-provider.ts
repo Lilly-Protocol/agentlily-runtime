@@ -4,6 +4,10 @@ import type {
   ModelResponse
 } from "./model-provider.js";
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 export interface OpenAICompatibleProviderOptions {
   apiKey: string;
   baseUrl?: string | undefined;
@@ -99,59 +103,57 @@ export class OpenAICompatibleModelProvider implements ModelProvider {
       );
     }
 
-    let data: {
-      choices?: Array<{
-        message?: {
-          content?: string | null;
-        };
-        finish_reason?: string;
-      }>;
-      usage?: Record<string, unknown>;
-      model?: string;
-    };
-
+    let responseText: string;
     try {
-      data = JSON.parse(rawBody);
-    } catch {
-      const bodyExcerpt = rawBody.length > 200 ? `${rawBody.slice(0, 200)}...` : rawBody;
+      responseText = await response.text();
+    } catch (error) {
       throw new Error(
-        `OpenAI-compatible provider returned invalid JSON (HTTP ${response.status}): ${bodyExcerpt}`
+        `OpenAI-compatible provider could not read HTTP ${response.status} response body.`,
+        { cause: error }
       );
     }
 
-    if (!data || typeof data !== "object") {
+    let data: unknown;
+    try {
+      data = JSON.parse(responseText) as unknown;
+    } catch (error) {
+      const excerpt = JSON.stringify(responseText.slice(0, 200));
       throw new Error(
-        `OpenAI-compatible provider returned malformed response object (HTTP ${response.status}).`
+        `OpenAI-compatible provider returned invalid JSON (HTTP ${response.status}): ${excerpt}${responseText.length > 200 ? "..." : ""}`,
+        { cause: error }
       );
     }
 
-    if (!Array.isArray(data.choices) || data.choices.length === 0) {
+    if (
+      !isRecord(data) ||
+      !Array.isArray(data.choices) ||
+      data.choices.length === 0
+    ) {
       throw new Error(
-        `OpenAI-compatible provider response missing non-empty "choices" array.`
+        `OpenAI-compatible provider returned malformed response (HTTP ${response.status}): expected a non-empty choices array.`
       );
     }
 
-    const firstChoice = data.choices[0];
-    if (!firstChoice || typeof firstChoice !== "object") {
+    const choice: unknown = data.choices[0];
+    if (
+      !isRecord(choice) ||
+      !isRecord(choice.message) ||
+      typeof choice.message.content !== "string"
+    ) {
       throw new Error(
-        `OpenAI-compatible provider response contains malformed choice entry.`
+        `OpenAI-compatible provider returned malformed response (HTTP ${response.status}): expected choices[0].message.content to be a string.`
       );
     }
 
-    const messageContent = firstChoice.message?.content;
-    if (typeof messageContent !== "string") {
-      throw new Error(
-        `OpenAI-compatible provider choice missing string message content.`
-      );
-    }
-
-    const outputText = messageContent;
+    // Explicit empty strings are valid text responses. Missing/null content,
+    // including tool-call-only completions, cannot satisfy this text-only API.
+    const outputText = choice.message.content;
     const metadata: Record<string, unknown> = {
       model: data.model ?? this.model
     };
 
-    if (firstChoice.finish_reason !== undefined) {
-      metadata.finishReason = firstChoice.finish_reason;
+    if (choice.finish_reason !== undefined) {
+      metadata.finishReason = choice.finish_reason;
     }
     if (data.usage !== undefined) {
       metadata.usage = data.usage;
@@ -162,4 +164,16 @@ export class OpenAICompatibleModelProvider implements ModelProvider {
       metadata
     };
   }
+}
+
+function formatBodyExcerpt(body: string): string {
+  const compact = body.replace(/\s+/g, " ").trim();
+  if (compact.length === 0) {
+    return "<empty body>";
+  }
+
+  const maxLength = 500;
+  return compact.length > maxLength
+    ? `${compact.slice(0, maxLength)}...`
+    : compact;
 }

@@ -27,6 +27,17 @@ describe("UnconfiguredModelProvider", () => {
     expect(response.outputText.length).toBeGreaterThan(0);
   });
 
+  it("reports zero lengths when prompt fields are absent at runtime", async () => {
+    const response = await provider.generate(
+      {} as { instructions: string; input: string }
+    );
+
+    expect(response.metadata).toMatchObject({
+      instructionsLength: 0,
+      inputLength: 0
+    });
+  });
+
   it("ignores prompt arguments completely", async () => {
     const r1 = await provider.generate({ instructions: "a", input: "b" });
     const r2 = await provider.generate({
@@ -35,5 +46,14 @@ describe("UnconfiguredModelProvider", () => {
     });
 
     expect(r1.outputText).toBe(r2.outputText);
+  });
+
+  it("handles undefined instructions or input gracefully in metadata", async () => {
+    const response = await provider.generate({} as unknown as { instructions: string; input: string });
+    expect(response.metadata).toEqual({
+      warning: "unconfigured_provider",
+      instructionsLength: 0,
+      inputLength: 0
+    });
   });
 });
