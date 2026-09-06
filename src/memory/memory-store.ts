@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { dirname } from "node:path";
+import { RuntimeError } from "../errors/runtime-errors.js";
 
 export interface MemoryEntry {
   agentId: string;
@@ -133,63 +134,43 @@ export class InMemoryMemoryStore implements MemoryStore {
   }
 }
 
-// Global write serialization queues keyed by normalized canonical file path
-const fileWriteQueues = new Map<string, Promise<unknown>>();
-
-const serializeFileOperation = <T>(
-  filePath: string,
-  operation: () => Promise<T>
-): Promise<T> => {
-  const canonicalPath = resolve(filePath);
-  const currentQueue = fileWriteQueues.get(canonicalPath) ?? Promise.resolve();
-
-  const nextPromise = currentQueue
-    .catch(() => {})
-    .then(async () => {
-      return await operation();
-    });
-
-  fileWriteQueues.set(canonicalPath, nextPromise);
-
-  nextPromise.finally(() => {
-    if (fileWriteQueues.get(canonicalPath) === nextPromise) {
-      fileWriteQueues.delete(canonicalPath);
-    }
-  });
-
-  return nextPromise;
-};
+export interface JsonFileMemoryStoreOptions {
+  /**
+   * Maximum total entries retained across all agents before FIFO eviction.
+   * Default: unbounded (undefined).
+   */
+  maxEntries?: number;
+  /**
+   * Maximum entries retained per individual agent before FIFO eviction.
+   * Default: unbounded (undefined).
+   */
+  maxEntriesPerAgent?: number;
+}
 
 export class JsonFileMemoryStore implements MemoryStore {
   private readonly filePath: string;
   private memoryCache: MemoryEntry[] | null = null;
+  public readonly maxEntries: number;
 
-  public constructor(filePath: string) {
+  public constructor(filePath: string, options: { maxEntries?: number } = {}) {
     this.filePath = filePath;
+    this.maxEntries = options.maxEntries ?? DEFAULT_MAX_MEMORY_ENTRIES;
+    if (!Number.isInteger(this.maxEntries) || this.maxEntries < 1) {
+      throw new RangeError("maxEntries must be a positive integer.");
+    }
   }
 
   public getFilePath(): string {
     return this.filePath;
   }
 
-  private async readEntriesFromDisk(): Promise<MemoryEntry[]> {
-    if (!existsSync(this.filePath)) {
-      return [];
-    }
+  public get capacity(): number {
+    return this.maxEntries;
+  }
 
-    try {
-      const raw = await readFile(this.filePath, "utf-8");
-      if (raw.trim().length === 0) {
-        return [];
-      }
-      const parsed: unknown = JSON.parse(raw);
-      if (Array.isArray(parsed)) {
-        return parsed as MemoryEntry[];
-      }
-      return [];
-    } catch {
-      return [];
-    }
+  public async size(): Promise<number> {
+    const entries = await this.loadEntries();
+    return entries.length;
   }
 
   private async loadEntries(): Promise<MemoryEntry[]> {
@@ -197,64 +178,108 @@ export class JsonFileMemoryStore implements MemoryStore {
       return this.memoryCache;
     }
 
-    const loaded = await this.readEntriesFromDisk();
-    this.memoryCache = loaded;
+    if (!existsSync(this.filePath)) {
+      return [];
+    }
+
+    const raw = await readFile(this.filePath, "utf-8");
+    if (raw.trim().length === 0) {
+      this.memoryCache = [];
+      return this.memoryCache;
+    }
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (error) {
+      throw new RuntimeError(
+        "STORAGE_CORRUPTED",
+        `Corrupted memory storage file at ${this.filePath}: invalid JSON.`,
+        {
+          filePath: this.filePath,
+          cause: error instanceof Error ? error.message : String(error)
+        }
+      );
+    }
+
+    if (!Array.isArray(parsed)) {
+      throw new RuntimeError(
+        "STORAGE_CORRUPTED",
+        `Corrupted memory storage file at ${this.filePath}: expected a JSON array of entries.`,
+        {
+          filePath: this.filePath,
+          receivedType: typeof parsed
+        }
+      );
+    }
+
+    this.memoryCache = parsed as MemoryEntry[];
     return this.memoryCache;
   }
 
-  private async flushAtomic(entries: MemoryEntry[]): Promise<void> {
+  private async flush(): Promise<void> {
+    if (this.memoryCache === null) {
+      return;
+    }
+
     const dir = dirname(this.filePath);
     if (dir && dir !== "." && !existsSync(dir)) {
       await mkdir(dir, { recursive: true });
     }
-    const data = JSON.stringify(entries, null, 2);
-    const tempPath = `${this.filePath}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`;
-    await writeFile(tempPath, data, "utf-8");
-    await rename(tempPath, this.filePath);
+    const data = JSON.stringify(this.memoryCache, null, 2);
+    await writeFile(this.filePath, data, "utf-8");
   }
 
   public async append(entry: MemoryEntry): Promise<void> {
-    await serializeFileOperation(this.filePath, async () => {
-      // Always re-read from disk to capture any concurrent updates from other instances or processes
-      const entries = await this.readEntriesFromDisk();
-      entries.push({
-        agentId: entry.agentId,
-        taskId: entry.taskId,
-        input: entry.input,
-        output: entry.output,
-        recordedAt: entry.recordedAt
-      });
-      await this.flushAtomic(entries);
-      this.memoryCache = entries;
-    });
+    const entryCopy: MemoryEntry = {
+      agentId: entry.agentId,
+      taskId: entry.taskId,
+      input: entry.input,
+      output: entry.output,
+      recordedAt: entry.recordedAt
+    };
+
+    const entries = await this.loadEntries();
+    const entryCopy: MemoryEntry = {
+      agentId: entry.agentId,
+      taskId: entry.taskId,
+      input: entry.input,
+      output: entry.output,
+      recordedAt: entry.recordedAt
+    };
+
+    if (entries.length >= this.maxEntries) {
+      entries.shift();
+    }
+
+    entries.push(entryCopy);
+    await this.flush();
   }
 
   public async listByAgent(
     agentId: string,
     options?: ListMemoryOptions
   ): Promise<MemoryEntry[]> {
-    return await serializeFileOperation(this.filePath, async () => {
-      const entries = await this.readEntriesFromDisk();
-      this.memoryCache = entries;
-      const matching = entries.filter((item) => item.agentId === agentId);
-      const offset = options?.offset ?? 0;
-      const limit = options?.limit ?? matching.length;
-      return matching.slice(offset, offset + limit).map((e) => ({ ...e }));
-    });
+    const entries = await this.loadEntries();
+    const matching = entries.filter((entry) => entry.agentId === agentId);
+    const offset = options?.offset ?? 0;
+    const limit = options?.limit ?? matching.length;
+    return matching.slice(offset, offset + limit).map((entry) => ({ ...entry }));
   }
 
   public async countByAgent(agentId: string): Promise<number> {
-    return await serializeFileOperation(this.filePath, async () => {
-      const entries = await this.readEntriesFromDisk();
-      this.memoryCache = entries;
-      return entries.filter((item) => item.agentId === agentId).length;
-    });
+    const entries = await this.loadEntries();
+    return entries.filter((entry) => entry.agentId === agentId).length;
   }
 
   public async clear(): Promise<void> {
-    await serializeFileOperation(this.filePath, async () => {
-      this.memoryCache = [];
-      await this.flushAtomic([]);
-    });
+    this.memoryCache = [];
+    // Remove the backing file to match the "empty or removed backing file" acceptance criterion
+    try {
+      const { rm } = await import("node:fs/promises");
+      await rm(this.filePath, { force: true });
+    } catch {
+      // Ignore removal errors (file may not exist)
+    }
   }
 }
