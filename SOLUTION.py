@@ -1,85 +1,53 @@
-src/runtime/agent_runtime.py
-from __future__ import annotations
+from datetime import datetime
+from dataclasses import dataclass, field
+from typing import Callable, Dict, List, Any, Optional
 
-import asyncio
-from typing import Any, Callable, Dict, List, Optional
-from enum import Enum
+DEFAULT_MAX_LISTENERS: int = 100
 
-class INVALID_TASK(RuntimeError):
-    """Exception raised when a task payload fails non-empty validation before event emission."""
-    def __init__(self, message: str = ""):
-        super().__init__(message)
+@dataclass
+class RuntimeInternalError:
+    """Consolidated definition for runtime.internal.error payload shape."""
+    eventName: str
+    error: Any
+    occurredAt: datetime = field(default_factory=datetime.now)
 
-class AgentRuntime:
-    def __init__(self, runner: Optional[Any] = None) -> None:
-        self._runner = runner
-        self._listeners: Dict[str, List[Callable]] = {}
-        self._current_task: Optional[Dict[str, Any]] = None
+class RuntimeEventBus:
+    """Consolidated RuntimeEventBus with single listenerCount logic."""
+    
+    def __init__(self, maxListeners: int = DEFAULT_MAX_LISTENERS):
+        self._listeners: Dict[str, List[Callable]] = field(default_factory=dict)
+        self._maxListeners = maxListeners
 
-    def _notify(self, event_name: str, data: Dict[str, Any]) -> None:
-        """Emit an event to all registered listeners. Pythonic equivalent of event emission."""
-        listeners = self._listeners.get(event_name, [])
-        for listener in listeners:
-            asyncio.create_task(listener(data))
+    def listener_count(self, name: Optional[str] = None) -> int:
+        """Consolidated definition for listenerCount() matching the dual lines 106/145."""
+        if name is None:
+            return len(self._listeners)
+        return len(self._listeners.get(name, []))
 
-    def on(self, event_name: str, listener: Callable) -> None:
-        """Register a listener for a specific event."""
-        if event_name not in self._listeners:
-            self._listeners[event_name] = []
-        self._listeners[event_name].append(listener)
+    def on(self, name: str, listener: Callable) -> None:
+        """Standard listener attachment logic."""
+        if self._listeners.get(name) is None:
+            self._listeners[name] = []
+        self._listeners[name].append(listener)
 
-    async def execute_task(self, task: Dict[str, Any]) -> None:
-        """
-        Orchestrates the task lifecycle. Validates fields *before* emitting 
-        `runtime.task.received` to ensure the event stream is polluted only by 
-        genuinely received tasks.
+    def emit(self, name: str, payload: Any) -> int:
+        """Emit logic that utilizes the RuntimeInternalError structure for context."""
+        # Emit returns the number of listeners currently matched
+        count = len(self._listeners.get(name, []))
         
-        1. Validates `taskId`, `agentId`, etc. (The Shared Guard).
-        2. Emits `task_received`.
-        3. Delegates to `TaskRunner` (which handles execution logic).
-        """
-        # 1. Shared Guard: Validate non-empty critical fields
-        # Using task.get() safely, raising INVALID_TASK on emptiness.
-        if not task.get("taskId"):
-            raise INVALID_TASK("taskId is required")
-        if not task.get("agentId"):
-            raise INVALID_TASK("agentId is required")
-        if not task.get("toolName", "default"): # Optional toolName
-            pass
-        if not task.get("input", {}): # Optional input
-            pass
+        if name in self._listeners:
+            for listener in self._listeners[name]:
+                listener(payload)
+        return count
 
-        # 2. Emit the 'received' event so listeners know a valid task arrived
-        self._notify("task_received", task)
-        self._current_task = task
+    def onOnce(self, name: str, listener: Callable) -> Callable:
+        """Convenience method for once semantics."""
+        self.on(name, listener)
+        return listener
 
-        # 3. Delegate to the TaskRunner for heavy lifting
-        # Note: Runner might emit 'task_failed' or similar if execution diverges
-        if self._runner:
-            await self._runner.run(task)
+    @property
+    def listeners(self) -> Dict[str, List[Callable]]:
+        return self._listeners
 
-    def get_current_task(self) -> Optional[Dict[str, Any]]:
-        """Helper to introspect the currently active task."""
-        return self._current_task
-
-# Example TaskRunner for context (simulating src/tasks/task_runner.py)
-class TaskRunner:
-    def __init__(self) -> None:
-        pass
-
-    async def run(self, task: Dict[str, Any]) -> None:
-        """
-        Executes the actual task logic. 
-        Accepts a pre-validated task from AgentRuntime.
-        """
-        # Simulate processing time
-        await asyncio.sleep(0.01)
-
-        # Example logic that might pollute state if not caught by AgentRuntime
-        # self._notify('task_failed', task) 
-        pass
-
-    @classmethod
-    def create(cls, runner_impl: Any = None) -> TaskRunner:
-        runner_impl = runner_impl or cls()
-        return runner_impl
+    def __len__(self) -> int:
+        return self.listener_count()
