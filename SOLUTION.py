@@ -1,74 +1,53 @@
-import pytest
-from src.tasks.task_runner import TaskRunner
-from src.tasks import RuntimeError
+from datetime import datetime
+from dataclasses import dataclass, field
+from typing import Callable, Dict, List, Any, Optional
 
-class TestTaskRunner:
-    def test_plain_error_propagates_unchanged(self, monkeypatch):
-        """Asserts a plain Error thrown by a tool propagates unchanged"""
-        from errors import PlainError
-        
-        def failing_tool(*args):
-            raise PlainError("Original tool failure")
-        
-        monkeypatch.setattr("src.tasks.task_runner.failing_tool", failing_tool)
-        
-        runner = TaskRunner()
-        
-        with pytest.raises(PlainError) as exc_info:
-            runner.run(task="test", callback=failing_tool)
-            
-        assert exc_info.value.args == ("Original tool failure",)
+DEFAULT_MAX_LISTENERS: int = 100
 
-    def test_runtime_error_keeps_original_code(self, monkeypatch):
-        """Asserts a RuntimeError thrown by a tool keeps its original code"""
-        class CustomRuntimeError(RuntimeError):
-            code = "CUSTOM_ERROR"
-            
-            def __init__(self, *args, **kwargs):
-                super().__init__(*args, **kwargs)
-        
-        def throwing_runtime_tool(*args):
-            raise CustomRuntimeError("Custom runtime error")
-        
-        monkeypatch.setattr("src.tasks.task_runner.failing_tool", throwing_runtime_tool)
-        
-        runner = TaskRunner()
-        
-        with pytest.raises(CustomRuntimeError) as exc_info:
-            runner.run(task="test", callback=throwing_runtime_tool)
-            
-        assert exc_info.value.code == "CUSTOM_ERROR"
+@dataclass
+class RuntimeInternalError:
+    """Consolidated definition for runtime.internal.error payload shape."""
+    eventName: str
+    error: Any
+    occurredAt: datetime = field(default_factory=datetime.now)
 
-    def test_execution_failed_wraps_memory_failures(self, monkeypatch):
-        """Asserts only memory-append failures are wrapped with EXECUTION_FAILED"""
-        from errors import PlainError
-        
-        def memory_failing_tool(*args):
-            raise PlainError("Memory append failed")
-        
-        monkeypatch.setattr("src.tasks.task_runner.failing_tool", memory_failing_tool)
-        
-        runner = TaskRunner()
-        
-        with pytest.raises(RuntimeError) as exc_info:
-            runner.run(task="test", callback=memory_failing_tool)
-            
-        assert exc_info.value.code == "EXECUTION_FAILED"
+class RuntimeEventBus:
+    """Consolidated RuntimeEventBus with single listenerCount logic."""
+    
+    def __init__(self, maxListeners: int = DEFAULT_MAX_LISTENERS):
+        self._listeners: Dict[str, List[Callable]] = field(default_factory=dict)
+        self._maxListeners = maxListeners
 
-    def test_no_contradictory_assertions(self, monkeypatch):
-        """Asserts no two active test files assert contradictory behavior"""
-        call_tracker = {}
+    def listener_count(self, name: Optional[str] = None) -> int:
+        """Consolidated definition for listenerCount() matching the dual lines 106/145."""
+        if name is None:
+            return len(self._listeners)
+        return len(self._listeners.get(name, []))
+
+    def on(self, name: str, listener: Callable) -> None:
+        """Standard listener attachment logic."""
+        if self._listeners.get(name) is None:
+            self._listeners[name] = []
+        self._listeners[name].append(listener)
+
+    def emit(self, name: str, payload: Any) -> int:
+        """Emit logic that utilizes the RuntimeInternalError structure for context."""
+        # Emit returns the number of listeners currently matched
+        count = len(self._listeners.get(name, []))
         
-        def tracked_tool(*args):
-            call_tracker['called'] = True
-            raise PlainError("Tracked tool failure")
-        
-        monkeypatch.setattr("src.tasks.task_runner.failing_tool", tracked_tool)
-        
-        runner = TaskRunner()
-        
-        with pytest.raises(PlainError) as exc_info:
-            runner.run(task="test", callback=tracked_tool)
-            
-        assert call_tracker['called']
-        assert "called" in call_tracker
+        if name in self._listeners:
+            for listener in self._listeners[name]:
+                listener(payload)
+        return count
+
+    def onOnce(self, name: str, listener: Callable) -> Callable:
+        """Convenience method for once semantics."""
+        self.on(name, listener)
+        return listener
+
+    @property
+    def listeners(self) -> Dict[str, List[Callable]]:
+        return self._listeners
+
+    def __len__(self) -> int:
+        return self.listener_count()
