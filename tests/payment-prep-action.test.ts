@@ -130,4 +130,45 @@ describe("PaymentPrepAction", () => {
       })
     ).toThrowError(RuntimeError);
   });
+
+  it.each(["Infinity", "NaN", "1e309"])(
+    "rejects non-finite amount %s with INVALID_TASK",
+    (amount) => {
+      const tool = createPaymentPrepTool();
+      const context = createMockContext(`task-nonfinite-${amount}`);
+
+      expect(() =>
+        tool.execute({
+          payload: {
+            walletId: "GWALLET123",
+            amount
+          },
+          context
+        })
+      ).toThrowError(
+        expect.objectContaining({
+          code: "INVALID_TASK",
+          details: { amount }
+        })
+      );
+    }
+  );
+
+  it.each(["10.5", 10, "0.01"])(
+    "accepts finite positive amount %s",
+    async (amount) => {
+      const tool = createPaymentPrepTool();
+      const context = createMockContext(`task-finite-${amount}`);
+
+      const result = await tool.execute({
+        payload: {
+          walletId: "GWALLET123",
+          amount
+        },
+        context
+      });
+
+      expect(result.status).toBe("prepared");
+    }
+  );
 });

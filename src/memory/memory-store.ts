@@ -134,16 +134,43 @@ export class InMemoryMemoryStore implements MemoryStore {
   }
 }
 
+export interface JsonFileMemoryStoreOptions {
+  /**
+   * Maximum total entries retained across all agents before FIFO eviction.
+   * Default: unbounded (undefined).
+   */
+  maxEntries?: number;
+  /**
+   * Maximum entries retained per individual agent before FIFO eviction.
+   * Default: unbounded (undefined).
+   */
+  maxEntriesPerAgent?: number;
+}
+
 export class JsonFileMemoryStore implements MemoryStore {
   private readonly filePath: string;
   private memoryCache: MemoryEntry[] | null = null;
+  public readonly maxEntries: number;
 
-  public constructor(filePath: string) {
+  public constructor(filePath: string, options: { maxEntries?: number } = {}) {
     this.filePath = filePath;
+    this.maxEntries = options.maxEntries ?? DEFAULT_MAX_MEMORY_ENTRIES;
+    if (!Number.isInteger(this.maxEntries) || this.maxEntries < 1) {
+      throw new RangeError("maxEntries must be a positive integer.");
+    }
   }
 
   public getFilePath(): string {
     return this.filePath;
+  }
+
+  public get capacity(): number {
+    return this.maxEntries;
+  }
+
+  public async size(): Promise<number> {
+    const entries = await this.loadEntries();
+    return entries.length;
   }
 
   private async loadEntries(): Promise<MemoryEntry[]> {
@@ -152,8 +179,7 @@ export class JsonFileMemoryStore implements MemoryStore {
     }
 
     if (!existsSync(this.filePath)) {
-      this.memoryCache = [];
-      return this.memoryCache;
+      return [];
     }
 
     const raw = await readFile(this.filePath, "utf-8");
@@ -165,23 +191,24 @@ export class JsonFileMemoryStore implements MemoryStore {
     let parsed: unknown;
     try {
       parsed = JSON.parse(raw);
-    } catch (cause) {
+    } catch (error) {
       throw new RuntimeError(
-        "STORAGE_CORRUPTION",
-        `Corrupted JsonFileMemoryStore file at ${this.filePath}: invalid JSON content.`,
+        "STORAGE_CORRUPTED",
+        `Corrupted memory storage file at ${this.filePath}: invalid JSON.`,
         {
           filePath: this.filePath,
-          cause: cause instanceof Error ? cause.message : String(cause)
+          cause: error instanceof Error ? error.message : String(error)
         }
       );
     }
 
     if (!Array.isArray(parsed)) {
       throw new RuntimeError(
-        "STORAGE_CORRUPTION",
-        `Corrupted JsonFileMemoryStore file at ${this.filePath}: expected JSON array of memory entries.`,
+        "STORAGE_CORRUPTED",
+        `Corrupted memory storage file at ${this.filePath}: expected a JSON array of entries.`,
         {
-          filePath: this.filePath
+          filePath: this.filePath,
+          receivedType: typeof parsed
         }
       );
     }
@@ -191,27 +218,68 @@ export class JsonFileMemoryStore implements MemoryStore {
   }
 
   private async flush(): Promise<void> {
+    if (this.memoryCache === null) {
+      return;
+    }
+
     const dir = dirname(this.filePath);
     if (dir && dir !== "." && !existsSync(dir)) {
       await mkdir(dir, { recursive: true });
     }
-    const data = JSON.stringify(this.memoryCache ?? [], null, 2);
+    const data = JSON.stringify(this.memoryCache, null, 2);
     await writeFile(this.filePath, data, "utf-8");
   }
 
   public async append(entry: MemoryEntry): Promise<void> {
+    const entryCopy: MemoryEntry = {
+      agentId: entry.agentId,
+      taskId: entry.taskId,
+      input: entry.input,
+      output: entry.output,
+      recordedAt: entry.recordedAt
+    };
+
     const entries = await this.loadEntries();
-    entries.push(entry);
+    const entryCopy: MemoryEntry = {
+      agentId: entry.agentId,
+      taskId: entry.taskId,
+      input: entry.input,
+      output: entry.output,
+      recordedAt: entry.recordedAt
+    };
+
+    if (entries.length >= this.maxEntries) {
+      entries.shift();
+    }
+
+    entries.push(entryCopy);
     await this.flush();
   }
 
-  public async listByAgent(agentId: string): Promise<MemoryEntry[]> {
+  public async listByAgent(
+    agentId: string,
+    options?: ListMemoryOptions
+  ): Promise<MemoryEntry[]> {
     const entries = await this.loadEntries();
-    return entries.filter((entry) => entry.agentId === agentId);
+    const matching = entries.filter((entry) => entry.agentId === agentId);
+    const offset = options?.offset ?? 0;
+    const limit = options?.limit ?? matching.length;
+    return matching.slice(offset, offset + limit).map((entry) => ({ ...entry }));
+  }
+
+  public async countByAgent(agentId: string): Promise<number> {
+    const entries = await this.loadEntries();
+    return entries.filter((entry) => entry.agentId === agentId).length;
   }
 
   public async clear(): Promise<void> {
     this.memoryCache = [];
-    await this.flush();
+    // Remove the backing file to match the "empty or removed backing file" acceptance criterion
+    try {
+      const { rm } = await import("node:fs/promises");
+      await rm(this.filePath, { force: true });
+    } catch {
+      // Ignore removal errors (file may not exist)
+    }
   }
 }
