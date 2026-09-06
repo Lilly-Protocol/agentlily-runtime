@@ -8,10 +8,16 @@ import type { RuntimeTask, TaskExecutionResult } from "./task-types.js";
 export class TaskRunner {
   private readonly actionExecutor: ActionExecutor;
   private readonly memoryStore: MemoryStore;
+  private readonly timeoutMs: number | undefined;
 
-  public constructor(actionExecutor: ActionExecutor, memoryStore: MemoryStore) {
+  public constructor(
+    actionExecutor: ActionExecutor,
+    memoryStore: MemoryStore,
+    timeoutMs?: number
+  ) {
     this.actionExecutor = actionExecutor;
     this.memoryStore = memoryStore;
+    this.timeoutMs = timeoutMs;
   }
 
   public async run<TPayload, TResult>(
@@ -26,8 +32,8 @@ export class TaskRunner {
     const startTime = performance.now();
     const startedAt = new Date().toISOString();
 
-    // Tool execution errors are part of the tool contract and should remain
-    // observable to callers without being rewritten by TaskRunner.
+    // Tool execution errors are part of the tool contract and must propagate
+    // unchanged so callers retain the original error identity and code.
     const output = await this.actionExecutor.execute<TPayload, TResult>(
       task.toolName,
       task.payload,
@@ -47,9 +53,8 @@ export class TaskRunner {
         recordedAt: completedAt
       });
     } catch (error) {
-      if (error instanceof RuntimeError) {
-        throw error;
-      }
+      // Persistence failures are runtime execution failures even when the
+      // underlying store happens to throw a typed RuntimeError of its own.
       throw new RuntimeError(
         "EXECUTION_FAILED",
         error instanceof Error ? error.message : "Task execution failed.",
@@ -66,5 +71,43 @@ export class TaskRunner {
       completedAt,
       durationMs
     };
+  }
+
+  private async executeWithTimeout<TPayload, TResult>(
+    toolName: string,
+    payload: TPayload,
+    context: RuntimeContext
+  ): Promise<TResult> {
+    const execution = this.actionExecutor.execute<TPayload, TResult>(
+      toolName,
+      payload,
+      context
+    );
+    const timeoutMs = this.timeoutMs;
+
+    if (timeoutMs === undefined) {
+      return execution;
+    }
+
+    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timeoutHandle = setTimeout(() => {
+        reject(
+          new RuntimeError(
+            "EXECUTION_FAILED",
+            `Task execution timed out after ${timeoutMs}ms.`,
+            { timeoutMs }
+          )
+        );
+      }, timeoutMs);
+    });
+
+    try {
+      return await Promise.race([execution, timeout]);
+    } finally {
+      if (timeoutHandle !== undefined) {
+        clearTimeout(timeoutHandle);
+      }
+    }
   }
 }
