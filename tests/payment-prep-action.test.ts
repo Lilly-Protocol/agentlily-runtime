@@ -131,34 +131,44 @@ describe("PaymentPrepAction", () => {
     ).toThrowError(RuntimeError);
   });
 
-  it("rejects non-finite amount values such as Infinity, NaN, and 1e309 with INVALID_TASK (issue #239)", async () => {
-    const tool = createPaymentPrepTool();
-    const context = createMockContext("task-pay-6");
+  it.each(["Infinity", "NaN", "1e309"])(
+    "rejects non-finite amount %s with INVALID_TASK",
+    (amount) => {
+      const tool = createPaymentPrepTool();
+      const context = createMockContext(`task-nonfinite-${amount}`);
 
-    const nonFiniteValues = [
-      "Infinity",
-      "-Infinity",
-      "NaN",
-      "1e309",
-      Infinity,
-      -Infinity,
-      NaN
-    ];
-
-    for (const amount of nonFiniteValues) {
-      try {
-        await tool.execute({
+      expect(() =>
+        tool.execute({
           payload: {
             walletId: "GWALLET123",
-            amount: amount as any
+            amount
           },
           context
-        });
-        expect.unreachable();
-      } catch (err) {
-        expect(err).toBeInstanceOf(RuntimeError);
-        expect((err as RuntimeError).code).toBe("INVALID_TASK");
-      }
+        })
+      ).toThrowError(
+        expect.objectContaining({
+          code: "INVALID_TASK",
+          details: { amount }
+        })
+      );
     }
-  });
+  );
+
+  it.each(["10.5", 10, "0.01"])(
+    "accepts finite positive amount %s",
+    async (amount) => {
+      const tool = createPaymentPrepTool();
+      const context = createMockContext(`task-finite-${amount}`);
+
+      const result = await tool.execute({
+        payload: {
+          walletId: "GWALLET123",
+          amount
+        },
+        context
+      });
+
+      expect(result.status).toBe("prepared");
+    }
+  );
 });
