@@ -75,4 +75,104 @@ describe("RuntimeEventBus", () => {
     expect(l2).toHaveBeenCalledTimes(1);
     expect(otherListener).not.toHaveBeenCalled();
   });
+
+  it("fires once() listener exactly once and automatically deregisters", () => {
+    const bus = new RuntimeEventBus();
+    const listener = vi.fn();
+
+    bus.once("runtime.started", listener);
+    expect(bus.listenerCount("runtime.started")).toBe(1);
+
+    bus.emit({
+      name: "runtime.started",
+      payload: { runtimeId: "rt-once-1", occurredAt: "2026-09-01T00:00:00Z" }
+    });
+
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(bus.listenerCount("runtime.started")).toBe(0);
+
+    bus.emit({
+      name: "runtime.started",
+      payload: { runtimeId: "rt-once-2", occurredAt: "2026-09-01T00:00:01Z" }
+    });
+
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
+
+  it("allows off() to remove a listener registered via once() before it fires (Issue #251)", () => {
+    const bus = new RuntimeEventBus();
+    const listener = vi.fn();
+
+    bus.once("runtime.task.failed", listener);
+    expect(bus.listenerCount("runtime.task.failed")).toBe(1);
+
+    const removed = bus.off("runtime.task.failed", listener);
+    expect(removed).toBe(true);
+    expect(bus.listenerCount("runtime.task.failed")).toBe(0);
+
+    bus.emit({
+      name: "runtime.task.failed",
+      payload: {
+        runtimeId: "rt-1",
+        taskId: "t-1",
+        agentId: "a-1",
+        reason: "test failure"
+      }
+    });
+
+    expect(listener).not.toHaveBeenCalled();
+  });
+
+  it("handles unsubscribe returned by once() correctly", () => {
+    const bus = new RuntimeEventBus();
+    const listener = vi.fn();
+
+    const unsubscribe = bus.once("runtime.stopped", listener);
+    expect(bus.listenerCount("runtime.stopped")).toBe(1);
+
+    unsubscribe();
+    expect(bus.listenerCount("runtime.stopped")).toBe(0);
+
+    bus.emit({
+      name: "runtime.stopped",
+      payload: { runtimeId: "rt-1", occurredAt: "2026-09-01T00:00:00Z" }
+    });
+
+    expect(listener).not.toHaveBeenCalled();
+  });
+});
+
+describe("RuntimeEventBus registration guards (merged from root suite)", () => {
+  it("does not re-add the same listener when it is already registered", () => {
+    const eventBus = new RuntimeEventBus({ maxListeners: 1 });
+    const listener = vi.fn();
+
+    eventBus.on("runtime.started", listener);
+    expect(() => eventBus.on("runtime.started", listener)).not.toThrow();
+    expect(eventBus.listenerCount("runtime.started")).toBe(1);
+  });
+
+  it("applies maxListeners independently per event name", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const eventBus = new RuntimeEventBus({ maxListeners: 1 });
+    eventBus.on("runtime.started", vi.fn());
+
+    // Second distinct listener for the same event warns but still registers.
+    expect(() => eventBus.on("runtime.started", vi.fn())).not.toThrow();
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(eventBus.listenerCount("runtime.started")).toBe(2);
+
+    // A different event name has its own quota.
+    expect(() => eventBus.on("runtime.task.failed", vi.fn())).not.toThrow();
+    expect(eventBus.listenerCount("runtime.task.failed")).toBe(1);
+
+    warnSpy.mockRestore();
+  });
+
+  it.each([0, -1, 1.5, Number.NaN])(
+    "rejects invalid maxListeners value %s",
+    (maxListeners) => {
+      expect(() => new RuntimeEventBus({ maxListeners })).toThrow(RangeError);
+    }
+  );
 });
