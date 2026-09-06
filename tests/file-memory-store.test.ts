@@ -1,9 +1,9 @@
 import { existsSync } from "node:fs";
-import { rm } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, rm, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { JsonFileMemoryStore } from "../src/index.js";
+import { JsonFileMemoryStore, RuntimeError } from "../src/index.js";
 
 describe("JsonFileMemoryStore", () => {
   let tempFilePath: string;
@@ -91,5 +91,433 @@ describe("JsonFileMemoryStore", () => {
     const store = new JsonFileMemoryStore(tempFilePath);
     const entries = await store.listByAgent("nonexistent-agent");
     expect(entries).toEqual([]);
+    expect(await store.size()).toBe(0);
+    expect(await store.countByAgent("nonexistent-agent")).toBe(0);
+  });
+
+  it("handles empty file safely and rejects malformed or non-array file with STORAGE_CORRUPTED", async () => {
+    await mkdir(dirname(tempFilePath), { recursive: true });
+    await writeFile(tempFilePath, "   \n  ", "utf-8");
+
+    const emptyStore = new JsonFileMemoryStore(tempFilePath);
+    expect(await emptyStore.size()).toBe(0);
+    expect(await emptyStore.listByAgent("agent-1")).toEqual([]);
+
+    await writeFile(tempFilePath, "not-valid-json", "utf-8");
+    const malformedStore = new JsonFileMemoryStore(tempFilePath);
+    await expect(malformedStore.size()).rejects.toSatisfy((err: unknown) => {
+      expect(err).toBeInstanceOf(RuntimeError);
+      expect((err as RuntimeError).code).toBe("STORAGE_CORRUPTED");
+      return true;
+    });
+    await expect(malformedStore.listByAgent("agent-1")).rejects.toSatisfy((err: unknown) => {
+      expect(err).toBeInstanceOf(RuntimeError);
+      expect((err as RuntimeError).code).toBe("STORAGE_CORRUPTED");
+      return true;
+    });
+
+    await writeFile(tempFilePath, JSON.stringify({ notAnArray: true }), "utf-8");
+    const objectStore = new JsonFileMemoryStore(tempFilePath);
+    await expect(objectStore.size()).rejects.toSatisfy((err: unknown) => {
+      expect(err).toBeInstanceOf(RuntimeError);
+      expect((err as RuntimeError).code).toBe("STORAGE_CORRUPTED");
+      return true;
+    });
+    await expect(objectStore.listByAgent("agent-1")).rejects.toSatisfy((err: unknown) => {
+      expect(err).toBeInstanceOf(RuntimeError);
+      expect((err as RuntimeError).code).toBe("STORAGE_CORRUPTED");
+      return true;
+    });
+  });
+
+  it("supports pagination in listByAgent", async () => {
+    const store = new JsonFileMemoryStore(tempFilePath);
+    for (let i = 1; i <= 5; i++) {
+      await store.append({
+        agentId: "agent-page",
+        taskId: `task-${i}`,
+        input: `input-${i}`,
+        output: null,
+        recordedAt: new Date().toISOString()
+      });
+    }
+
+    const page1 = await store.listByAgent("agent-page", { offset: 0, limit: 2 });
+    expect(page1.map((e) => e.taskId)).toEqual(["task-1", "task-2"]);
+
+    const page2 = await store.listByAgent("agent-page", { offset: 2, limit: 2 });
+    expect(page2.map((e) => e.taskId)).toEqual(["task-3", "task-4"]);
+
+    const page3 = await store.listByAgent("agent-page", { offset: 4, limit: 2 });
+    expect(page3.map((e) => e.taskId)).toEqual(["task-5"]);
+
+    const beyond = await store.listByAgent("agent-page", { offset: 10, limit: 2 });
+    expect(beyond).toEqual([]);
+  });
+
+  it("counts entries by agent and returns total size", async () => {
+    const store = new JsonFileMemoryStore(tempFilePath);
+    await store.append({
+      agentId: "agent-x",
+      taskId: "t1",
+      input: "x1",
+      output: null,
+      recordedAt: new Date().toISOString()
+    });
+    await store.append({
+      agentId: "agent-x",
+      taskId: "t2",
+      input: "x2",
+      output: null,
+      recordedAt: new Date().toISOString()
+    });
+    await store.append({
+      agentId: "agent-y",
+      taskId: "t3",
+      input: "y1",
+      output: null,
+      recordedAt: new Date().toISOString()
+    });
+
+    expect(await store.countByAgent("agent-x")).toBe(2);
+    expect(await store.countByAgent("agent-y")).toBe(1);
+    expect(await store.countByAgent("agent-z")).toBe(0);
+    expect(await store.size()).toBe(3);
+  });
+
+  it("clears all entries and flushes empty array to disk", async () => {
+    const store = new JsonFileMemoryStore(tempFilePath);
+    await store.append({
+      agentId: "agent-clear",
+      taskId: "t1",
+      input: "clear me",
+      output: null,
+      recordedAt: new Date().toISOString()
+    });
+
+    expect(await store.size()).toBe(1);
+
+    await store.clear();
+
+    expect(await store.size()).toBe(0);
+    expect(await store.listByAgent("agent-clear")).toEqual([]);
+
+    const reloaded = new JsonFileMemoryStore(tempFilePath);
+    expect(await reloaded.size()).toBe(0);
+    expect(await reloaded.listByAgent("agent-clear")).toEqual([]);
+  });
+
+  it("enforces maxEntries and maxEntriesPerAgent capacity limits", async () => {
+    expect(() => new JsonFileMemoryStore(tempFilePath, { maxEntries: -1 })).toThrow(RangeError);
+    expect(() => new JsonFileMemoryStore(tempFilePath, { maxEntries: 0 })).toThrow(RangeError);
+
+    const store = new JsonFileMemoryStore(tempFilePath, {
+      maxEntries: 3,
+      maxEntriesPerAgent: 2
+    });
+    expect(store.capacity).toBe(3);
+
+    await store.append({
+      agentId: "a1",
+      taskId: "t1",
+      input: "a1-1",
+      output: null,
+      recordedAt: new Date().toISOString()
+    });
+    await store.append({
+      agentId: "a1",
+      taskId: "t2",
+      input: "a1-2",
+      output: null,
+      recordedAt: new Date().toISOString()
+    });
+    await store.append({
+      agentId: "a1",
+      taskId: "t3",
+      input: "a1-3",
+      output: null,
+      recordedAt: new Date().toISOString()
+    });
+
+    // Per-agent eviction kicked in: maxEntriesPerAgent is 2
+    const a1Entries = await store.listByAgent("a1");
+    expect(a1Entries.map((e) => e.taskId)).toEqual(["t2", "t3"]);
+
+    // Global eviction check
+    await store.append({
+      agentId: "a2",
+      taskId: "t4",
+      input: "a2-1",
+      output: null,
+      recordedAt: new Date().toISOString()
+    });
+    await store.append({
+      agentId: "a2",
+      taskId: "t5",
+      input: "a2-2",
+      output: null,
+      recordedAt: new Date().toISOString()
+    });
+
+    expect(await store.size()).toBe(3);
+  });
+
+  it("handles concurrent appends across multiple JsonFileMemoryStore instances without lost updates", async () => {
+    const store1 = new JsonFileMemoryStore(tempFilePath);
+    const store2 = new JsonFileMemoryStore(tempFilePath);
+
+    const count = 20;
+    const promises: Promise<void>[] = [];
+
+    for (let i = 0; i < count; i++) {
+      promises.push(
+        store1.append({
+          agentId: "agent-multi",
+          taskId: `store1-task-${i}`,
+          input: `Input 1-${i}`,
+          output: { i },
+          recordedAt: new Date().toISOString()
+        })
+      );
+      promises.push(
+        store2.append({
+          agentId: "agent-multi",
+          taskId: `store2-task-${i}`,
+          input: `Input 2-${i}`,
+          output: { i },
+          recordedAt: new Date().toISOString()
+        })
+      );
+    }
+
+    await Promise.all(promises);
+
+    const checkStore = new JsonFileMemoryStore(tempFilePath);
+    const entries = await checkStore.listByAgent("agent-multi");
+    expect(entries).toHaveLength(count * 2);
+
+    const taskIds = new Set(entries.map((e) => e.taskId));
+    for (let i = 0; i < count; i++) {
+      expect(taskIds.has(`store1-task-${i}`)).toBe(true);
+      expect(taskIds.has(`store2-task-${i}`)).toBe(true);
+    }
+  });
+
+  it("handles concurrent appends on a single cold cache instance without lost updates", async () => {
+    const store = new JsonFileMemoryStore(tempFilePath);
+    const count = 30;
+    const promises: Promise<void>[] = [];
+
+    for (let i = 0; i < count; i++) {
+      promises.push(
+        store.append({
+          agentId: "agent-single",
+          taskId: `task-${i}`,
+          input: `Input ${i}`,
+          output: { i },
+          recordedAt: new Date().toISOString()
+        })
+      );
+    }
+
+    await Promise.all(promises);
+
+    const entries = await store.listByAgent("agent-single");
+    expect(entries).toHaveLength(count);
+  });
+
+  it("supports countByAgent and clear operations across serialized instances", async () => {
+    const store = new JsonFileMemoryStore(tempFilePath);
+    await store.append({
+      agentId: "agent-count",
+      taskId: "task-c1",
+      input: "c1",
+      output: {},
+      recordedAt: new Date().toISOString()
+    });
+    await store.append({
+      agentId: "agent-count",
+      taskId: "task-c2",
+      input: "c2",
+      output: {},
+      recordedAt: new Date().toISOString()
+    });
+    await store.append({
+      agentId: "other-agent",
+      taskId: "task-o1",
+      input: "o1",
+      output: {},
+      recordedAt: new Date().toISOString()
+    });
+
+    const count = await store.countByAgent("agent-count");
+    expect(count).toBe(2);
+
+    const otherStore = new JsonFileMemoryStore(tempFilePath);
+    await otherStore.clear();
+
+    const emptyCount = await store.countByAgent("agent-count");
+    expect(emptyCount).toBe(0);
+    const emptyList = await store.listByAgent("agent-count");
+    expect(emptyList).toEqual([]);
+  });
+
+  it("handles empty and whitespace-only files gracefully as empty history", async () => {
+    const { mkdir, writeFile } = await import("node:fs/promises");
+    const { dirname } = await import("node:path");
+    await mkdir(dirname(tempFilePath), { recursive: true });
+    await writeFile(tempFilePath, "   \n\t  ", "utf-8");
+
+    const store = new JsonFileMemoryStore(tempFilePath);
+    const entries = await store.listByAgent("agent-empty");
+    expect(entries).toEqual([]);
+
+    await store.append({
+      agentId: "agent-empty",
+      taskId: "task-new",
+      input: "input",
+      output: "ok",
+      recordedAt: new Date().toISOString()
+    });
+    const updated = await store.listByAgent("agent-empty");
+    expect(updated).toHaveLength(1);
+  });
+
+  it("throws RuntimeError with code STORAGE_CORRUPTION when JSON file is invalid/corrupt", async () => {
+    const { mkdir, writeFile } = await import("node:fs/promises");
+    const { dirname } = await import("node:path");
+    await mkdir(dirname(tempFilePath), { recursive: true });
+    await writeFile(tempFilePath, "{\"truncated\": true, invalid_json...", "utf-8");
+
+    const store = new JsonFileMemoryStore(tempFilePath);
+
+    await expect(store.listByAgent("any-agent")).rejects.toThrowError(
+      /Corrupted JsonFileMemoryStore file/
+    );
+
+    try {
+      await store.append({
+        agentId: "agent-1",
+        taskId: "task-1",
+        input: "in",
+        output: "out",
+        recordedAt: new Date().toISOString()
+      });
+      expect.unreachable("append should have failed on corrupted file");
+    } catch (err: any) {
+      expect(err.name).toBe("RuntimeError");
+      expect(err.code).toBe("STORAGE_CORRUPTION");
+      expect(err.details?.filePath).toBe(tempFilePath);
+    }
+  });
+
+  it("throws RuntimeError with code STORAGE_CORRUPTION when JSON root is not an array", async () => {
+    const { mkdir, writeFile } = await import("node:fs/promises");
+    const { dirname } = await import("node:path");
+    await mkdir(dirname(tempFilePath), { recursive: true });
+    await writeFile(tempFilePath, JSON.stringify({ notAnArray: true }), "utf-8");
+
+    const store = new JsonFileMemoryStore(tempFilePath);
+
+    await expect(store.listByAgent("any-agent")).rejects.toMatchObject({
+      code: "STORAGE_CORRUPTION"
+    });
+  });
+
+  it("satisfies MemoryStore contract with clear(), size(), and countByAgent()", async () => {
+    const store = new JsonFileMemoryStore(tempFilePath);
+
+    await store.append({
+      agentId: "agent-a",
+      taskId: "task-1",
+      input: "in 1",
+      output: "out 1",
+      recordedAt: new Date().toISOString()
+    });
+
+    await store.append({
+      agentId: "agent-a",
+      taskId: "task-2",
+      input: "in 2",
+      output: "out 2",
+      recordedAt: new Date().toISOString()
+    });
+
+    await store.append({
+      agentId: "agent-b",
+      taskId: "task-3",
+      input: "in 3",
+      output: "out 3",
+      recordedAt: new Date().toISOString()
+    });
+
+    expect(await store.size()).toBe(3);
+    expect(await store.countByAgent("agent-a")).toBe(2);
+    expect(await store.countByAgent("agent-b")).toBe(1);
+
+    await store.clear();
+
+    expect(await store.size()).toBe(0);
+    expect(await store.listByAgent("agent-a")).toEqual([]);
+    expect(await store.countByAgent("agent-a")).toBe(0);
+  });
+
+  it("honors offset and limit in listByAgent matching InMemoryMemoryStore semantics", async () => {
+    const store = new JsonFileMemoryStore(tempFilePath);
+
+    for (let i = 1; i <= 5; i++) {
+      await store.append({
+        agentId: "agent-page",
+        taskId: `task-${i}`,
+        input: `in ${i}`,
+        output: `out ${i}`,
+        recordedAt: new Date().toISOString()
+      });
+    }
+
+    const page1 = await store.listByAgent("agent-page", { offset: 0, limit: 2 });
+    expect(page1).toHaveLength(2);
+    expect(page1[0]?.taskId).toBe("task-1");
+    expect(page1[1]?.taskId).toBe("task-2");
+
+    const page2 = await store.listByAgent("agent-page", { offset: 2, limit: 2 });
+    expect(page2).toHaveLength(2);
+    expect(page2[0]?.taskId).toBe("task-3");
+    expect(page2[1]?.taskId).toBe("task-4");
+
+    const page3 = await store.listByAgent("agent-page", { offset: 4, limit: 2 });
+    expect(page3).toHaveLength(1);
+    expect(page3[0]?.taskId).toBe("task-5");
+  });
+
+  it("enforces maxEntries capacity FIFO eviction", async () => {
+    const store = new JsonFileMemoryStore(tempFilePath, { maxEntries: 2 });
+    expect(store.capacity).toBe(2);
+
+    await store.append({
+      agentId: "agent-c",
+      taskId: "task-1",
+      input: "1",
+      output: "1",
+      recordedAt: new Date().toISOString()
+    });
+    await store.append({
+      agentId: "agent-c",
+      taskId: "task-2",
+      input: "2",
+      output: "2",
+      recordedAt: new Date().toISOString()
+    });
+    await store.append({
+      agentId: "agent-c",
+      taskId: "task-3",
+      input: "3",
+      output: "3",
+      recordedAt: new Date().toISOString()
+    });
+
+    expect(await store.size()).toBe(2);
+    const list = await store.listByAgent("agent-c");
+    expect(list.map((e) => e.taskId)).toEqual(["task-2", "task-3"]);
   });
 });

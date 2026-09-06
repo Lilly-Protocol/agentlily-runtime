@@ -4,12 +4,27 @@ import type {
   ModelResponse
 } from "./model-provider.js";
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 export interface OpenAICompatibleProviderOptions {
   apiKey: string;
   baseUrl?: string | undefined;
   model?: string | undefined;
   timeoutMs?: number | undefined;
   headers?: Record<string, string> | undefined;
+}
+
+type JsonObject = Record<string, unknown>;
+
+function isJsonObject(value: unknown): value is JsonObject {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function getBodyExcerpt(body: string): string {
+  const excerpt = body.replace(/\s+/g, " ").trim().slice(0, 200);
+  return excerpt.length > 0 ? excerpt : "<empty body>";
 }
 
 export class OpenAICompatibleModelProvider implements ModelProvider {
@@ -91,31 +106,65 @@ export class OpenAICompatibleModelProvider implements ModelProvider {
       throw new Error(`OpenAI-compatible provider request failed: ${message}`);
     }
 
+    const rawBody = await response.text().catch(() => "");
+
     if (!response.ok) {
-      const errorText = await response.text().catch(() => "");
       throw new Error(
-        `OpenAI-compatible provider returned HTTP ${response.status}: ${errorText}`
+        `OpenAI-compatible provider returned HTTP ${response.status}: ${rawBody}`
       );
     }
 
-    const data = (await response.json()) as {
-      choices?: Array<{
-        message?: {
-          content?: string;
-        };
-        finish_reason?: string;
-      }>;
-      usage?: Record<string, unknown>;
-      model?: string;
-    };
+    let responseText: string;
+    try {
+      responseText = await response.text();
+    } catch (error) {
+      throw new Error(
+        `OpenAI-compatible provider could not read HTTP ${response.status} response body.`,
+        { cause: error }
+      );
+    }
 
-    const outputText = data.choices?.[0]?.message?.content ?? "";
+    let data: unknown;
+    try {
+      data = JSON.parse(responseText) as unknown;
+    } catch (error) {
+      const excerpt = JSON.stringify(responseText.slice(0, 200));
+      throw new Error(
+        `OpenAI-compatible provider returned invalid JSON (HTTP ${response.status}): ${excerpt}${responseText.length > 200 ? "..." : ""}`,
+        { cause: error }
+      );
+    }
+
+    if (
+      !isRecord(data) ||
+      !Array.isArray(data.choices) ||
+      data.choices.length === 0
+    ) {
+      throw new Error(
+        `OpenAI-compatible provider returned malformed response (HTTP ${response.status}): expected a non-empty choices array.`
+      );
+    }
+
+    const choice: unknown = data.choices[0];
+    if (
+      !isRecord(choice) ||
+      !isRecord(choice.message) ||
+      typeof choice.message.content !== "string"
+    ) {
+      throw new Error(
+        `OpenAI-compatible provider returned malformed response (HTTP ${response.status}): expected choices[0].message.content to be a string.`
+      );
+    }
+
+    // Explicit empty strings are valid text responses. Missing/null content,
+    // including tool-call-only completions, cannot satisfy this text-only API.
+    const outputText = choice.message.content;
     const metadata: Record<string, unknown> = {
       model: data.model ?? this.model
     };
 
-    if (data.choices?.[0]?.finish_reason !== undefined) {
-      metadata.finishReason = data.choices[0].finish_reason;
+    if (choice.finish_reason !== undefined) {
+      metadata.finishReason = choice.finish_reason;
     }
     if (data.usage !== undefined) {
       metadata.usage = data.usage;
@@ -126,4 +175,16 @@ export class OpenAICompatibleModelProvider implements ModelProvider {
       metadata
     };
   }
+}
+
+function formatBodyExcerpt(body: string): string {
+  const compact = body.replace(/\s+/g, " ").trim();
+  if (compact.length === 0) {
+    return "<empty body>";
+  }
+
+  const maxLength = 500;
+  return compact.length > maxLength
+    ? `${compact.slice(0, maxLength)}...`
+    : compact;
 }

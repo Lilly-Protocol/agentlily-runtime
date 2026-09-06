@@ -1,15 +1,24 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { ConsoleRuntimeLogger } from "../../src/logger/runtime-logger.js";
+import { afterEach, describe, it, expect, vi, beforeEach } from "vitest";
+import {
+  ConsoleRuntimeLogger,
+  InMemoryRuntimeLogger
+} from "../../src/logger/runtime-logger.js";
 
 describe("ConsoleRuntimeLogger level filtering", () => {
   let infoSpy: ReturnType<typeof vi.spyOn>;
+  let debugSpy: ReturnType<typeof vi.spyOn>;
   let warnSpy: ReturnType<typeof vi.spyOn>;
   let errorSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
     infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+    debugSpy = vi.spyOn(console, "debug").mockImplementation(() => {});
     warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   it("logs all levels when level=info (default)", () => {
@@ -40,5 +49,28 @@ describe("ConsoleRuntimeLogger level filtering", () => {
     expect(infoSpy).not.toHaveBeenCalled();
     expect(warnSpy).toHaveBeenCalledTimes(1);
     expect(errorSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("matches in-memory filtering at the same configured threshold", () => {
+    const consoleLogger = new ConsoleRuntimeLogger({ level: "warn" });
+    const memoryLogger = new InMemoryRuntimeLogger({ level: "warn" });
+
+    consoleLogger.debug("debug");
+    consoleLogger.info("info");
+    consoleLogger.warn("warn");
+    consoleLogger.error("error");
+    memoryLogger.debug("debug");
+    memoryLogger.info("info");
+    memoryLogger.warn("warn");
+    memoryLogger.error("error");
+
+    expect(debugSpy).not.toHaveBeenCalled();
+    expect(infoSpy).not.toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+    expect(memoryLogger.entries.map((entry) => entry.level)).toEqual([
+      "warn",
+      "error"
+    ]);
   });
 });
