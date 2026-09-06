@@ -39,14 +39,17 @@ export class ActionExecutor {
     payload: TPayload,
     context: RuntimeContext
   ): Promise<TResult> {
+    const tool = this.toolRegistry.get(toolName);
+
     const currentCount = this.getToolCallCount(context.taskId);
     if (this.maxToolCallsPerTask !== undefined) {
       assertMaxToolCalls(currentCount, this.maxToolCallsPerTask);
     }
 
+    const tool = this.toolRegistry.get(toolName);
+
     this.toolCallCounts.set(context.taskId, currentCount + 1);
 
-    const tool = this.toolRegistry.get(toolName);
     const startedAt = Date.now();
 
     this.eventBus?.emit({
@@ -56,18 +59,41 @@ export class ActionExecutor {
         taskId: context.taskId,
         agentId: resolveAgentId(context.agent),
         toolName,
-        invokedAt: new Date().toISOString()
-      }
+      },
     });
 
-    const result = (await tool.execute({
-      payload,
-      context
-    })) as TResult;
+    try {
+      const result = await tool.execute(payload, context);
+      const duration = Date.now() - startedAt;
 
-    const durationMs = Math.max(0, Date.now() - startedAt);
-    this.logger?.info("Tool invocation completed.", { toolName, durationMs });
+      this.eventBus?.emit({
+        name: "runtime.tool.success",
+        payload: {
+          runtimeId: context.runtimeId,
+          taskId: context.taskId,
+          agentId: resolveAgentId(context.agent),
+          toolName,
+          duration,
+        },
+      });
 
-    return result;
+      return result;
+    } catch (error) {
+      const duration = Date.now() - startedAt;
+
+      this.eventBus?.emit({
+        name: "runtime.tool.error",
+        payload: {
+          runtimeId: context.runtimeId,
+          taskId: context.taskId,
+          agentId: resolveAgentId(context.agent),
+          toolName,
+          duration,
+          error,
+        },
+      });
+
+      throw error;
+    }
   }
 }

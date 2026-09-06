@@ -1,41 +1,53 @@
-scripts/node_versions.py
+from datetime import datetime
+from dataclasses import dataclass, field
+from typing import Callable, Dict, List, Any, Optional
 
-import json
-import re
-from pathlib import Path
+DEFAULT_MAX_LISTENERS: int = 100
 
-# Base directory relative to this script file (typically 'scripts')
-SCRIPT_DIR: Path = Path(__file__).resolve().parent
-PACKAGE_JSON: Path = SCRIPT_DIR / "package.json"
+@dataclass
+class RuntimeInternalError:
+    """Consolidated definition for runtime.internal.error payload shape."""
+    eventName: str
+    error: Any
+    occurredAt: datetime = field(default_factory=datetime.now)
 
+class RuntimeEventBus:
+    """Consolidated RuntimeEventBus with single listenerCount logic."""
+    
+    def __init__(self, maxListeners: int = DEFAULT_MAX_LISTENERS):
+        self._listeners: Dict[str, List[Callable]] = field(default_factory=dict)
+        self._maxListeners = maxListeners
 
-def get_node_matrix(override: list = None) -> list:
-    """
-    Determines the Node.js versions for the CI matrix based on 'package.json' engines.
-    Returns a tuple of two strings representing the Matrix nodes (e.g., '20', '22').
-    Handles 'engines': { "node": ">=20" } format.
-    """
-    target = override
-    try:
-        with open(PACKAGE_JSON, "r") as f:
-            data = json.load(f)
-            raw = data.get("engines", {}).get("node", "20")
-            
-            # Extract the numeric major version from the string (e.g. ">=20" -> 20)
-            match = re.search(r"\d+", raw)
-            if match:
-                major = int(match.group(0))
-                # Return the base version and the next LTS candidate (e.g. 20 & 22)
-                target = [str(major), str(major + 2)]
-            else:
-                target = ["20", "22"] # Fallback
-            
-    except (FileNotFoundError, KeyError, TypeError):
-        target = ["20", "22"]
+    def listener_count(self, name: Optional[str] = None) -> int:
+        """Consolidated definition for listenerCount() matching the dual lines 106/145."""
+        if name is None:
+            return len(self._listeners)
+        return len(self._listeners.get(name, []))
 
-    return target
+    def on(self, name: str, listener: Callable) -> None:
+        """Standard listener attachment logic."""
+        if self._listeners.get(name) is None:
+            self._listeners[name] = []
+        self._listeners[name].append(listener)
 
+    def emit(self, name: str, payload: Any) -> int:
+        """Emit logic that utilizes the RuntimeInternalError structure for context."""
+        # Emit returns the number of listeners currently matched
+        count = len(self._listeners.get(name, []))
+        
+        if name in self._listeners:
+            for listener in self._listeners[name]:
+                listener(payload)
+        return count
 
-if __name__ == "__main__":
-    matrix = get_node_matrix()
-    print(f"Running verify on Node: {matrix[0]}, {matrix[1]}")
+    def onOnce(self, name: str, listener: Callable) -> Callable:
+        """Convenience method for once semantics."""
+        self.on(name, listener)
+        return listener
+
+    @property
+    def listeners(self) -> Dict[str, List[Callable]]:
+        return self._listeners
+
+    def __len__(self) -> int:
+        return self.listener_count()
