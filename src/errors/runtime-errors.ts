@@ -7,7 +7,7 @@ export type RuntimeErrorCode =
   | "INVALID_TASK"
   | "EXECUTION_FAILED"
   | "MAX_TOOL_CALLS_EXCEEDED"
-  | "DUPLICATE_IN_FLIGHT_TASK";
+  | "STORAGE_CORRUPTED";
 
 export class RuntimeError extends Error {
   public readonly code: RuntimeErrorCode;
