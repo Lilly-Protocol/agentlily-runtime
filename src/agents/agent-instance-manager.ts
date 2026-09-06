@@ -33,7 +33,7 @@ export class AgentInstanceManager {
       const oldestId = this.instances.keys().next().value;
       if (oldestId !== undefined) {
         this.instances.delete(oldestId);
-        this.evictionCount += 1;
+        this.evictionCount++;
       }
     }
 
@@ -44,6 +44,10 @@ export class AgentInstanceManager {
 
     this.instances.set(agentId, created);
     return created;
+  }
+
+  public getEvictionCount(): number {
+    return this.evictionCount;
   }
 
   public get(agentId: string): AgentInstance | undefined {

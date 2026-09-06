@@ -33,7 +33,7 @@ export function createRuntimeDependencies(options: RuntimeOptions) {
   const agentManager = new AgentInstanceManager(
     options.maxAgentInstances !== undefined
       ? { maxInstances: options.maxAgentInstances }
-      : undefined
+      : {}
   );
   const actionExecutor = new ActionExecutor(
     toolRegistry,

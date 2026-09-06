@@ -16,6 +16,7 @@ export interface RuntimeOptions {
    */
   maxAgentInstances?: number;
   maxToolCallsPerTask?: number;
+  maxAgentInstances?: number;
   memoryStore?: MemoryStore;
   memoryStoragePath?: string | undefined;
   modelProvider?: ModelProvider;
