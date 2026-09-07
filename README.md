@@ -1,18 +1,40 @@
-# agentlily-runtime
+# agentlily-runtime — Stellar-Aware Execution Runtime for Autonomous Finance Agents
 
 [![CI](https://img.shields.io/github/actions/workflow/status/lily-protocol/agentlily-runtime/ci.yml?branch=main)](https://github.com/lily-protocol/agentlily-runtime/actions/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](./LICENSE)
 [![Node.js >=20](https://img.shields.io/badge/node-%3E%3D20-339933)](https://nodejs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6)](https://www.typescriptlang.org/)
+[![Stellar](https://img.shields.io/badge/Stellar-agent%20finance-7D00FF)](https://developers.stellar.org/)
 
-`agentlily-runtime` is the execution layer for AgentLily instances in Lily
-Protocol, the autonomous agent finance infrastructure being built on Stellar.
+**The execution layer for AgentLily instances — autonomous AI agents that manage finance on the Stellar network.**
 
-This repository is intentionally designed as an open-source-ready runtime
-foundation, not a completed runtime product. It provides:
+`agentlily-runtime` is the TypeScript runtime that runs an **AgentLily**: an autonomous agent owned by Lily Protocol, the agent-finance infrastructure being built on **Stellar**. An AgentLily's job is to act on behalf of its controller — provisioning, preparing, and (soon) executing **Stellar wallet and payment tasks** with observable, auditable steps.
+
+## Stellar at a Glance
+
+- **`wallet.prepare_payment` tool (shipped today)** — a real, typed tool an AgentLily invokes to prepare a payment for its wallet: it validates the wallet and amount, defaults the asset to **native `XLM`**, and returns a simulated **Stellar transaction stub** (`stellar-stub-<taskId>-<walletId>`) — no live network call, safe for contributors to extend toward real submission.
+- **Payment-aware action boundary** — `src/actions/` shows how wallet/payment actions are structured; the scaffolding for executing against the live **Stellar network** (via Lily backend + Soroban contracts) is intentionally open contributor work.
+- **Event-driven & auditable** — every task and tool invocation emits runtime events so Stellar finance actions are traceable from intent → prepared transaction stub.
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  AgentLily (autonomous finance agent)                       │
+│   AgentRuntime ── tasks ── tools ── events ── memory        │
+│   └ wallet.prepare_payment → validated Stellar XLM stub     │
+└──────────────────────────┬──────────────────────────────────┘
+                           │ future: execute via Lily Protocol API
+                           ▼
+┌─────────────────────────────────────────────────────────────┐
+│  Lily Protocol on Stellar                                   │
+│   backend API · Soroban contracts · Stellar wallet/payments │
+└─────────────────────────────────────────────────────────────┘
+```
+
+This repository is intentionally designed as an open-source-ready runtime foundation, not a completed runtime product. It provides:
 
 - A modular TypeScript runtime architecture
 - One real happy-path execution flow for contributors to study and extend
+- A shipped, Stellar-flavored `wallet.prepare_payment` tool
 - Strict typing, tests, linting, and CI scaffolding
 - Clear extension points for unfinished systems
 
@@ -21,22 +43,21 @@ foundation, not a completed runtime product. It provides:
 The current implementation demonstrates a narrow, credible runtime path:
 
 1. Create an `AgentRuntime`
-2. Start the runtime and register tools
+2. Start the runtime and register tools (including `wallet.prepare_payment`)
 3. Build a runtime context for a task
 4. Execute a task through the task runner and action executor
 5. Invoke a typed tool
 6. Persist lightweight in-memory task history (or durable JSON file history via memoryStoragePath)
 7. Emit runtime events and structured log entries
 
-This gives contributors a working reference path without locking the project
-into premature architecture.
+This gives contributors a working reference path without locking the project into premature architecture.
 
 ## What Is Intentionally Unfinished
 
-The following areas are scaffolded with interfaces, types, or placeholders and
-are expected to become contributor work:
+The following areas are scaffolded with interfaces, types, or placeholders and are expected to become contributor work:
 
-- Wallet-aware and payment-aware actions
+- **Live Stellar network execution** — turning prepared payment stubs into submitted transactions through the Lily backend (agent controllers approve first)
+- Wallet-aware and payment-aware actions beyond the prep flow
 - Persistent database and vector storage backends (basic file-based JSON persistence is supported via JsonFileMemoryStore)
 - Model provider integrations (an `OpenAICompatibleModelProvider` scaffold is available for experimentation; note that it is scaffolded and intentionally not production-complete)
 - Runtime policy engines and approval flows
@@ -49,7 +70,7 @@ are expected to become contributor work:
 
 ```text
 src/
-  actions/     Minimal action execution flow
+  actions/     Minimal action execution flow + wallet.prepare_payment
   agents/      Agent instance lifecycle scaffolding
   errors/      Typed runtime errors
   events/      Runtime event model and event bus
@@ -109,6 +130,44 @@ const result = await runtime.executeTask({
 console.log(result.output);
 ```
 
+### Preparing a Stellar payment as an AgentLily
+
+The shipped `wallet.prepare_payment` tool lets an AgentLily prepare a payment for one of its wallets without touching the live network:
+
+```ts
+import {
+  AgentRuntime,
+  createPaymentPrepTool
+} from "@lily-protocol/agentlily-runtime";
+
+const runtime = new AgentRuntime({ runtimeId: "agentlily-pay" });
+runtime.registerTool(createPaymentPrepTool());
+
+await runtime.start();
+
+const prepared = await runtime.executeTask({
+  agentId: "agentlily_treasury",
+  taskId: "pay-001",
+  toolName: "wallet.prepare_payment",
+  input: "Prepare 25 XLM payment",
+  payload: {
+    walletId: "wallet_treasury",
+    amount: "25.00",
+    assetCode: "XLM",
+    memo: "monthly rebalance"
+  }
+});
+
+// prepared.output → {
+//   status: "prepared",
+//   transactionStubId: "stellar-stub-pay-001-wallet_treasury",
+//   assetCode: "XLM",
+//   amount: "25.00",
+//   isSimulated: true,
+//   ...
+// }
+```
+
 ## Runtime Events
 
 `agentlily-runtime` exposes an event system via `RuntimeEventBus` to support observability, audit logs, and tracing adapters.
@@ -165,68 +224,6 @@ unsubscribeCompleted();
 unsubscribeFailed();
 ```
 
-## Scripts
-
-- `npm run build` compiles the library
-- `npm run lint` runs ESLint
-- `npm run typecheck` runs TypeScript in no-emit mode
-- `npm run test` runs Vitest with coverage
-- `npm run verify` runs formatting, linting, typecheck, and tests
-
-## Runtime Events
-
-`agentlily-runtime` features an event-driven lifecycle managed by `RuntimeEventBus`. You can subscribe to events to build observers, audit loggers, metrics collectors, or tracing adapters.
-
-### Event Catalog
-
-The following table lists all events defined in `RuntimeEventMap`:
-
-| Event Name               | Description                                                          | Key Payload Fields                                         |
-| :----------------------- | :------------------------------------------------------------------- | :--------------------------------------------------------- |
-| `runtime.started`        | Emitted when `AgentRuntime.start()` successfully completes           | `runtimeId`, `occurredAt`                                  |
-| `runtime.stopped`        | Emitted when `AgentRuntime.stop()` finishes execution                | `runtimeId`, `occurredAt`                                  |
-| `runtime.task.received`  | Emitted before task execution begins                                 | `runtimeId`, `taskId`, `agentId`                           |
-| `runtime.task.completed` | Emitted when a task finishes execution successfully                  | `runtimeId`, `taskId`, `agentId`, `toolName`, `durationMs` |
-| `runtime.task.failed`    | Emitted when a task fails during execution                           | `runtimeId`, `taskId`, `agentId`, `reason`                 |
-| `runtime.tool.invoked`   | Emitted immediately before a tool is executed                        | `runtimeId`, `taskId`, `agentId`, `toolName`, `invokedAt`  |
-| `runtime.internal.error` | Emitted when a listener throws or an unhandled internal fault occurs | `eventName`, `errorMessage`, `occurredAt`                  |
-
-### Subscription Patterns
-
-You can inject a custom `RuntimeEventBus` into `AgentRuntime` or use `bus.on()` and `bus.once()` to listen for lifecycle events:
-
-```ts
-import {
-  AgentRuntime,
-  RuntimeEventBus
-} from "@lily-protocol/agentlily-runtime";
-
-const eventBus = new RuntimeEventBus();
-
-// Subscribe to task completion
-const unsubscribeCompleted = eventBus.on("runtime.task.completed", (event) => {
-  console.log(
-    `Task ${event.payload.taskId} completed in ${event.payload.durationMs}ms`
-  );
-});
-
-// Subscribe to task failures
-const unsubscribeFailed = eventBus.on("runtime.task.failed", (event) => {
-  console.error(`Task ${event.payload.taskId} failed: ${event.payload.reason}`);
-});
-
-const runtime = new AgentRuntime({
-  runtimeId: "monitored-runtime",
-  eventBus
-});
-
-await runtime.start();
-
-// Later, unsubscribe when no longer needed:
-unsubscribeCompleted();
-unsubscribeFailed();
-```
-
 ## Durable Memory via JsonFileMemoryStore
 
 For persistent task history across runtime restarts, configure `memoryStoragePath` in `RuntimeOptions`. When supplied, `AgentRuntime` initializes a `JsonFileMemoryStore` backing instance instead of the default ephemeral `InMemoryMemoryStore`.
@@ -258,14 +255,24 @@ Each entry appended to the storage file satisfies the `MemoryEntry` interface:
 - **No Inherent Capacity Limit:** Unlike `InMemoryMemoryStore`, `JsonFileMemoryStore` currently does not enforce global FIFO eviction or per-agent capacity limits; entries grow monotonically unless cleared manually via `clear()`.
 - **Multi-Process Concurrency:** Concurrent writes across multiple Node.js processes targeting the same file path without external file locking may cause race conditions or lost updates.
 
-Good first contributions should add depth without collapsing extension points.
-Examples:
+## Scripts
+
+- `npm run build` compiles the library
+- `npm run lint` runs ESLint
+- `npm run typecheck` runs TypeScript in no-emit mode
+- `npm run test` runs Vitest with coverage
+- `npm run verify` runs formatting, linting, typecheck, and tests
+
+## Good First Contributions
+
+The repo is designed so contributions add depth without collapsing extension points. Examples:
 
 - Add a new memory backend that implements `MemoryStore`
 - Introduce runtime policies around tool allowlists
 - Add an event sink or tracing adapter
 - Implement a model provider adapter with tests
 - Expand task lifecycle states beyond the current happy path
+- **Add a `wallet.sign` / `wallet.execute` tool path** that hands a prepared Stellar stub to the Lily backend for authorization and submission
 
 ## Suggested Next Issues
 
@@ -279,5 +286,4 @@ Maintainers can immediately create issues around:
 - Documentation examples
 - Test matrix expansion
 
-The backlog section in the final delivery summary from this setup provides a
-ready-made issue starter list.
+The backlog section in the final delivery summary from this setup provides a ready-made issue starter list.
